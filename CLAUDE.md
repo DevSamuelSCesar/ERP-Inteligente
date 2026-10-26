@@ -8,7 +8,7 @@ ERP Inteligente (nome provisório, projeto ainda sem nome). A premissa central �
 
 ## Estado atual
 
-O repositório contém apenas a base: este arquivo, `references/` e `.gitignore`. Ainda não há stack, código, build ou testes definidos. Quando forem adicionados, documente aqui os comandos de build, lint e testes (incluindo como rodar um único teste).
+A stack está definida em `references/STACK.md` (app desktop nativo em C# com Avalonia, SQLite, instruções de LLM em JSON/Markdown, provedores DeepSeek, Claude e OpenAI). A documentação no código (comentários, XML docs, identificadores, logs) é em inglês. A arquitetura adotada está em `references/ARQUITETURA.md`: o LLM lê dados por tool calling, mas só altera dados enviando um plano JSON (`submit_plan`), que um motor determinístico valida, simula e executa numa transação; planos bem-sucedidos viram receitas reutilizáveis sem LLM. `references/PROPOSTAS_ARQUITETURA.md` guarda as alternativas avaliadas. Ainda não há código, build ou testes. Quando forem adicionados, documente aqui os comandos de build, lint e testes (incluindo como rodar um único teste).
 
 ## `references/`
 
