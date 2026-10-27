@@ -7,7 +7,7 @@
 | Natan Correia da Silva | 231071692 |
 | Clara Gabryellen Paixão Aderno | 231070720 |
 | Samuel Santos César | 232070317 |
-| Rayan Santos Silva | [preencher] |
+| Rayan Santos Silva | 231070220 |
 
 Entrega para as duas disciplinas: **Projeto de Inteligência Artificial** e **Segurança e Otimização de BD** (parte comum, parte de IA, parte de Segurança e parte de integração).
 
