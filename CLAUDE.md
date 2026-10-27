@@ -19,7 +19,11 @@ python3 -m unittest discover -s db/tests -v                       # todos os tes
 python3 -m unittest db.tests.test_db.SqlInjectionTests -v          # uma classe (rodar da raiz)
 python3 -m unittest db.tests.test_db.AiConnectionTests.test_ai_cannot_write
 sqlite3 /tmp/erp.db < db/schema.sql && sqlite3 /tmp/erp.db < db/security.sql && sqlite3 /tmp/erp.db < db/seed.sql
+python3 tools/readme_to_pdf.py -o /tmp/README.pdf                  # README → PDF (Chrome/Chromium headless)
+python3 -m unittest discover -s tools/tests -v                     # testes do conversor
 ```
+
+PDFs são ignorados pelo git (`*.pdf`); nunca os adicione ao repositório. Os diagramas Mermaid do `README.md` são cópias dos de `references/DIAGRAMAS.md` (seções 1 e 2) e `references/UML.md`; ao alterar um, altere o outro.
 
 Quando o projeto C# for criado, documente aqui build, lint e testes.
 

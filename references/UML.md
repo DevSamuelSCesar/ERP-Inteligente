@@ -145,7 +145,7 @@ classDiagram
     OutboundOrder "*" --> "1" Customer
 ```
 
-## 3. Classes do motor de planos, IA e segurança
+## 3. Classes da camada de IA
 
 ```mermaid
 classDiagram
@@ -184,6 +184,9 @@ classDiagram
         +JsonSchema InputSchema
         +ExecuteAsync(JsonElement args) Task~JsonElement~
     }
+    class AiReadConnection {
+        +Authorize(action, table, column, view) AuthorizerResult
+    }
     class KnowledgeRetriever {
         +SearchAsync(string query, int k) Task~Chunk[]~
     }
@@ -195,6 +198,21 @@ classDiagram
         +IsAcceptable(Memory candidate) bool
     }
 
+    Planner --> ILlmProvider
+    Planner --> SkillRegistry
+    Planner --> IReadTool
+    Planner --> KnowledgeRetriever
+    Planner --> MemoryStore
+    RecipeMatcher --> ILlmProvider
+    SkillRegistry --> Skill
+    IReadTool --> AiReadConnection
+    MemoryStore --> MemoryFilter
+```
+
+## 4. Classes do motor de planos e segurança
+
+```mermaid
+classDiagram
     class Plan {
         +string Intent
         +PlanStep[] Steps
@@ -206,6 +224,18 @@ classDiagram
         +string Op
         +JsonElement Args
         +string? As
+    }
+    class RiskLevel {
+        <<enumeration>>
+        Read
+        Reversible
+        Critical
+    }
+    class Recipe {
+        +string Name
+        +Plan Template
+        +JsonSchema Parameters
+        +RecipeStatus Status
     }
     class IOperation {
         <<interface>>
@@ -234,19 +264,6 @@ classDiagram
     class PlanExecutor {
         +ExecuteAsync(Plan plan) Task~ExecutionResult~
     }
-    class Recipe {
-        +string Name
-        +Plan Template
-        +JsonSchema Parameters
-        +RecipeStatus Status
-    }
-    class RiskLevel {
-        <<enumeration>>
-        Read
-        Reversible
-        Critical
-    }
-
     class PolicyEngine {
         +IsAllowed(Principal p, string permission) bool
         +ForAi(User requester) Principal
@@ -265,33 +282,22 @@ classDiagram
         +Encrypt(string plain) EncryptedValue
         +Decrypt(EncryptedValue value) string
     }
-    class AiReadConnection {
-        +Authorize(action, table, column, view) AuthorizerResult
-    }
 
-    Planner --> ILlmProvider
-    Planner --> SkillRegistry
-    Planner --> IReadTool
-    Planner --> KnowledgeRetriever
-    Planner --> MemoryStore
-    MemoryStore --> MemoryFilter
-    RecipeMatcher --> ILlmProvider
-    RecipeMatcher --> Recipe
-    SkillRegistry --> Skill
-    IReadTool --> AiReadConnection
     Plan *-- PlanStep
     Plan --> RiskLevel
+    Recipe --> Plan
     PlanValidator --> IOperation
     PlanValidator --> PolicyEngine
+    PlanSimulator --> Plan
     PlanExecutor --> IOperation
     PlanExecutor --> AuditLog
+    PlanExecutor --> ColumnCipher
     ApprovalService --> PolicyEngine
     ApprovalService --> AuditLog
     PolicyEngine --> Principal
-    Recipe --> Plan
 ```
 
-## 4. Componentes e implantação
+## 5. Componentes e implantação
 
 ```mermaid
 flowchart TB

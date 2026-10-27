@@ -2,9 +2,9 @@
 
 ```
 erp_inteligente/
-├── .gitignore        # Arquivos ignorados pelo git (segredos, bancos .db, builds)
+├── .gitignore        # Arquivos ignorados pelo git (segredos, bancos .db, PDFs gerados, builds)
 ├── CLAUDE.md         # Orientações para o Claude Code neste repositório
-├── README.md         # Entrega do grupo: problema, canvas, partes de IA, Segurança e integração
+├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho
 │   ├── schema.sql    # Tabelas (STRICT), FTS5 de memórias e conhecimento, auditoria
 │   ├── security.sql  # Triggers DENY (imutabilidade, anti-escalonamento), permissões efetivas, views v_ai_* e mascaradas
@@ -14,6 +14,10 @@ erp_inteligente/
 │   ├── optimize.sql  # Índices que resolvem as consultas lentas
 │   └── tests/
 │       └── test_db.py  # Testes: imutabilidade, escalonamento, authorizer da IA, SQL injection, otimização
+├── tools/            # Utilitários do repositório
+│   ├── readme_to_pdf.py  # Converte o README.md (com diagramas Mermaid) em PDF via Chrome headless
+│   └── tests/
+│       └── test_readme_to_pdf.py  # Testes do conversor (HTML seguro, SRI, detecção do Chrome, PDF gerado)
 ├── knowledge/        # Base do RAG: 22 procedimentos e políticas fictícios de armazém (Markdown)
 │   └── README.md     # Origem e organização dos documentos
 └── references/       # Especificação e conceito do projeto

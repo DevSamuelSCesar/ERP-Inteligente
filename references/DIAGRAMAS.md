@@ -11,15 +11,9 @@ Mostra, num só desenho, o LLM, o RAG, o fine-tuning, a interface e o banco, e *
 flowchart TB
     OP(["Operador / Supervisor"])
 
-    subgraph EXT["Provedores externos · HTTPS · só dados não sensíveis"]
-        CLAUDE["Claude API<br/>Sonnet 5.5 · Haiku 5.5"]
-        OAI["OpenAI<br/>text-embedding-3-small"]
-        DS["DeepSeek / OpenAI chat<br/>opcionais"]
-    end
-
     subgraph APP["App desktop nativo · C# + Avalonia"]
         subgraph UI["Interface"]
-            LOGIN["Login<br/>Argon2id"]
+            LOGIN["Login · Argon2id"]
             CHAT["Chat"]
             PREV["Prévia do plano<br/>diff simulado"]
             APRV["Aprovação de<br/>operação crítica"]
@@ -29,77 +23,60 @@ flowchart TB
 
         subgraph AI["Camada de IA"]
             RM["Recipe Matcher<br/>Haiku 5.5 ou modelo ajustado"]
-            PL["Planner<br/>Sonnet 5.5"]
-            SK["Skills<br/>SKILL.md + skill.json"]
-            MEMF["🔒 Filtro de memória<br/>sem dados sensíveis"]
-            TOOLS["Ferramentas de leitura"]
+            PL["Planner · Sonnet 5.5<br/>skills · memórias filtradas 🔒"]
+            ROCONN["🔒 Ferramentas de leitura<br/>conexão read-only + authorizer<br/>só views v_ai_*"]
         end
 
         subgraph RAG["RAG"]
-            SRC["Fontes<br/>knowledge/*.md · SKILL.md · receitas"]
-            CHK["Chunking<br/>por seção ##, ~500 tokens"]
+            CHK["knowledge/*.md · SKILL.md<br/>chunking por seção ##"]
             EMB["Embeddings<br/>1.536 dimensões"]
-            HYB["Busca híbrida<br/>BM25 + cosseno · RRF · top-4"]
+            HYB["Busca híbrida<br/>BM25 + cosseno · top-4"]
         end
 
         subgraph ENG["Motor determinístico · sem LLM"]
-            VAL["Validator<br/>JSON Schema + regras + 🔒 permissões"]
+            VAL["Validator<br/>schema · regras · 🔒 permissões"]
             SIM["Simulator<br/>diff + risco"]
             EXE["Executor<br/>transação · SQL parametrizado"]
         end
+    end
 
-        ROCONN["🔒 Conexão da IA<br/>somente leitura + authorizer<br/>só views v_ai_*"]
+    subgraph EXT["Provedores externos · HTTPS · sem dados sensíveis"]
+        CLAUDE["Claude API<br/>DeepSeek / OpenAI opcionais"]
+        OAI["OpenAI<br/>text-embedding-3-small"]
     end
 
     subgraph FT["Fine-tuning · offline"]
-        FTD["~500 pedidos fictícios<br/>anotados · 80/20"]
-        FTM["LoRA em modelo aberto pequeno"]
-        FTE["Avaliação vs Haiku<br/>exact match · F1 · JSON válido"]
+        FTD["~500 pedidos fictícios"]
+        FTM["LoRA em modelo<br/>aberto pequeno"]
+        FTE["Avaliação vs Haiku"]
     end
 
-    subgraph DB["🔒 SQLite + SQLCipher (AES-256 em repouso)"]
-        DOM[("Domínio<br/>colunas *_enc AES-GCM")]
-        LEDGER[("stock_movements<br/>append-only")]
-        PLANS[("plans · recipes")]
-        MEMDB[("memories + FTS5")]
-        VEC[("knowledge_chunks<br/>FTS5 + sqlite-vec")]
-        ACL[("roles · role_permissions<br/>ALLOW / DENY")]
-        AUD[("🔒 audit_log<br/>cadeia de hash")]
-        TRG["🔒 Triggers DENY<br/>imutabilidade · anti-escalonamento"]
+    subgraph DB["🔒 SQLite + SQLCipher · AES-256 em repouso"]
+        DATA[("Domínio + stock_movements<br/>*_enc AES-GCM · append-only")]
+        AIDATA[("plans · recipes · memories<br/>knowledge FTS5 + sqlite-vec")]
+        SEC[("🔒 role_permissions ALLOW/DENY<br/>audit_log com cadeia de hash<br/>triggers DENY")]
     end
 
-    OP --> LOGIN --> CHAT
-    CHAT --> POL --> RM
+    OP --> LOGIN --> CHAT --> POL --> RM
     RM -- "receita" --> VAL
     RM -- "sem receita" --> PL
     RM <--> CLAUDE
     PL <--> CLAUDE
-    PL -.-> DS
-    PL --> SK
-    PL --> TOOLS --> ROCONN
-    ROCONN --> DOM
-    ROCONN --> PLANS
-    PL --> HYB
-    HYB --> VEC
-    SRC --> CHK --> EMB --> VEC
+    PL --> ROCONN --> DATA
+    PL --> HYB --> AIDATA
+    CHK --> EMB --> AIDATA
     EMB <--> OAI
-    PL --> MEMF --> MEMDB
     PL -- "submit_plan" --> VAL
     VAL -- "erro estruturado" --> PL
-    VAL --> ACL
     VAL --> SIM
     SIM -- "crítico" --> PREV --> APRV --> EXE
     SIM -- "reversível" --> EXE
-    EXE --> DOM
-    EXE --> LEDGER
-    EXE --> PLANS
-    TRG -. "protege" .-> LEDGER
-    TRG -. "protege" .-> AUD
-    TRG -. "protege" .-> ACL
-    POL --> AUD
-    VAL --> AUD
-    EXE --> AUD
-    APRV --> AUD
+    EXE --> DATA
+    EXE --> AIDATA
+    POL --> SEC
+    VAL --> SEC
+    EXE --> SEC
+    APRV --> SEC
     FTD --> FTM --> FTE -- "se aprovado" --> RM
 ```
 
