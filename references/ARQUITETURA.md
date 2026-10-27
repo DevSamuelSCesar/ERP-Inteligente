@@ -170,13 +170,26 @@ Tabela `memories` no SQLite:
 - **Origem:** correções do operador, rejeições na aprovação, erros de validação recorrentes e o resultado das execuções.
 - **Busca:** FTS5 com ranking BM25, combinado com filtro por escopo, confiança e recência.
 - **Manutenção:** um job periódico deduplica, mescla memórias parecidas e descarta as de baixa confiança ou sem uso.
-- **Embeddings** (`sqlite-vec`) são uma evolução opcional, adotada só se a busca textual se mostrar insuficiente.
+- **Proteção:** memórias passam por um filtro antes de serem gravadas: tamanho máximo de 1.000 caracteres, sem dados sensíveis (CPF, e-mail, telefone, CNPJ completo) e sem texto que pareça instrução ao modelo. Memórias criadas a partir de conteúdo externo entram com confiança baixa.
+
+### RAG
+
+| Etapa | Escolha |
+|-------|---------|
+| Fontes | Procedimentos e políticas do armazém (`knowledge/*.md`), `SKILL.md` das skills e descrições de receitas |
+| Chunking | Um trecho por seção `##` do Markdown, com o título do documento e da seção no início do trecho; seções acima de ~500 tokens são divididas com sobreposição de ~50 tokens |
+| Embeddings | `text-embedding-3-small` (OpenAI, 1.536 dimensões). Anthropic e DeepSeek não oferecem API de embeddings. Alternativa local, sem enviar texto para fora: um modelo de embeddings aberto rodando na própria máquina |
+| Banco vetorial | `sqlite-vec` (tabela virtual `vec0`) no mesmo arquivo SQLite, ligada a `knowledge_chunks` |
+| Busca | Híbrida: top-20 do FTS5/BM25 + top-20 por similaridade de cosseno, combinados por *Reciprocal Rank Fusion*; os 4 melhores trechos entram no contexto |
+| Atualização | Cada trecho guarda o SHA-256 do conteúdo; só trechos alterados geram embedding de novo |
+
+Os trechos recuperados entram no prompt **delimitados como dados de referência**, com o caminho do documento de origem, e nunca como instruções (seção 12.8).
 
 ### Política de RAG
 
 | Usar RAG | Não usar RAG |
 |----------|--------------|
-| Memórias, skills, receitas | Saldos, endereços, pedidos e qualquer dado estruturado: são lidos por consultas tipadas |
+| Procedimentos, políticas, skills, memórias, receitas | Saldos, endereços, pedidos e qualquer dado estruturado: são lidos por consultas tipadas |
 
 ---
 
@@ -199,7 +212,28 @@ skills/
 
 - Interface única `ILlmProvider` (chat, tool calling, streaming e contagem de tokens) com adaptadores para **Claude**, **OpenAI** e **DeepSeek**. A API da DeepSeek é compatível com a da OpenAI.
 - **Modelo por papel:** um modelo barato para identificar receitas e extrair parâmetros, e um modelo forte para planejar e tratar exceções. Ambos são configuráveis.
-- As chaves de API ficam no armazenamento seguro do sistema operacional, nunca no SQLite em texto puro.
+
+| Papel | Modelo padrão | Alternativas suportadas |
+|-------|---------------|-------------------------|
+| Planner | Claude Sonnet 5.5 (`claude-sonnet-5-5`) | Claude Opus 5.5, `deepseek-v4-pro`, modelos da OpenAI |
+| Receitas e extração de parâmetros | Claude Haiku 5.5 (`claude-haiku-5-5`) ou o modelo ajustado por fine-tuning (seção 10.1) | `deepseek-flash` |
+| Embeddings | `text-embedding-3-small` | Modelo de embeddings local |
+
+A justificativa e o custo por 1.000 usos estão em [`IA.md`](IA.md).
+
+- As chaves de API ficam no armazenamento seguro do sistema operacional, nunca no SQLite nem no repositório.
+
+### 10.1 Fine-tuning
+
+Experimento para reduzir custo e dependência de rede na etapa mais frequente: transformar um pedido em uma receita com parâmetros.
+
+| Item | Definição |
+|------|-----------|
+| Tarefa | Pedido em linguagem natural → JSON `{intent, recipe, params}` (ou `{"intent":"none"}` quando nenhuma receita serve) |
+| Dados | ~500 pedidos fictícios gerados a partir das receitas e do catálogo de teste, com variações de escrita, erros de digitação e pedidos fora do escopo; anotados e revisados pelo grupo; divisão 80/20 |
+| Modelo base | Modelo aberto pequeno (classe 1–3 bilhões de parâmetros, ex.: Qwen2.5-1.5B-Instruct) com LoRA, rodando localmente |
+| Métricas | *Exact match* do JSON, F1 por campo de parâmetro, taxa de JSON válido e taxa de acerto em "nenhuma receita" |
+| Comparação | Mesmo conjunto de teste com Claude Haiku 5.5 em *few-shot*; o modelo ajustado só substitui o Haiku se empatar ou superar no *exact match* |
 
 ---
 
@@ -207,19 +241,108 @@ skills/
 
 | Grupo | Conteúdo |
 |-------|----------|
-| Domínio | Produtos, endereços, saldos, lotes, pedidos de entrada e saída |
-| Planos | Plano JSON, status (`rejected`, `pending_approval`, `executed`, `failed`), diff simulado, tentativas |
+| Domínio | Produtos, endereços, saldos, lotes, fornecedores, clientes, pedidos de entrada e saída |
+| Livro-razão | `stock_movements`: uma linha por mudança de estoque, nunca alterada nem apagada |
+| Planos | Plano JSON, status (`validating`, `pending_approval`, `rejected`, `executed`, `failed`), diff simulado, tentativas, aprovador |
 | Receitas | Plano parametrizado, parâmetros, versões da DSL e da skill, estatísticas de uso e falha |
 | Memórias | Tabela `memories` + índice FTS5 |
-| Auditoria | Quem pediu, chamadas de ferramenta, plano final, aprovação e resultado |
+| Conhecimento (RAG) | `knowledge_chunks` + índice FTS5 + vetores `sqlite-vec` |
+| Acesso | `roles`, `role_permissions` (ALLOW/DENY), `users` |
+| Auditoria | `audit_log` encadeado por hash |
 
-Toda execução de plano roda numa única transação SQLite.
+O schema está em `db/schema.sql` e as regras de banco em `db/security.sql`. Toda execução de plano roda numa única transação SQLite.
 
 ---
 
-## 12. Segurança e auditoria
+## 12. Segurança de dados
 
-- O LLM **nunca** escreve SQL nem acessa o banco diretamente. Todo dado vindo do LLM é tratado como entrada não confiável e validado.
-- As operações do catálogo usam consultas parametrizadas.
-- Todo plano, aprovado ou rejeitado, fica registrado com sua origem: pedido, skill, modelo e receita.
-- Desfazer um plano reversível gera um **plano compensatório**, que passa pelo mesmo fluxo.
+### 12.1 Princípios
+
+- **Defesa em profundidade:** cada regra importante é aplicada em pelo menos duas camadas (aplicação e banco).
+- **Menor privilégio:** cada componente recebe só o acesso de que precisa. A IA tem o menor acesso de todos.
+- **A IA é um usuário não confiável:** tudo o que vem do LLM (planos, argumentos, memórias) é tratado como entrada externa e validado como se viesse de um formulário.
+- **Nada some:** movimentos, planos e auditoria são append-only. Correções são feitas por novos registros.
+
+### 12.2 Classificação dos dados
+
+| Classe | Exemplos | Regra |
+|--------|----------|-------|
+| Público | SKU, nome e descrição de produto, código de endereço, glossário | Pode aparecer em qualquer tela e no contexto da IA |
+| Interno | Saldos, lotes, pedidos, nome de fornecedor e cliente, planos, memórias | Só usuários autenticados com permissão; a IA vê pelas views `v_ai_*` |
+| Sensível | CPF, nome completo, e-mail e telefone de pessoas, CNPJ/CPF completo de terceiros, endereço de entrega, custo unitário, hash de senha | Criptografado por coluna, exibido mascarado, nunca enviado ao LLM, leitura só com `sensitive.read` |
+
+A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md).
+
+### 12.3 Proteção em repouso
+
+1. **Banco inteiro criptografado com SQLCipher** (AES-256). A chave é aleatória, gerada na instalação e guardada no cofre do sistema operacional: DPAPI no Windows, Keychain no macOS, Secret Service (libsecret) no Linux. Sem a chave, o arquivo `.db` copiado é ilegível.
+2. **Colunas sensíveis (`*_enc`) com AES-256-GCM** na aplicação, com uma segunda chave, também no cofre do sistema. Cada valor guarda nonce e tag de autenticação; um valor adulterado falha na leitura.
+3. **Mascaramento:** colunas `*_masked` e as views `v_*_masked` mostram só parte do dado (ex.: `**.***.***/0001-**`) para quem não tem `sensitive.read`.
+4. **Senhas** guardadas apenas como hash Argon2id.
+5. **Backups** feitos pela API de backup do SQLite a partir do banco aberto com SQLCipher, então continuam criptografados.
+
+### 12.4 Proteção em trânsito e minimização
+
+- Chamadas aos provedores de LLM e de embeddings só por HTTPS (TLS 1.2 ou superior).
+- O contexto enviado ao LLM é montado **somente** com dados das views `v_ai_*`, trechos do RAG e memórias filtradas. Dados sensíveis nunca saem da máquina.
+- Logs técnicos passam por um filtro que remove padrões de CPF, CNPJ, e-mail, telefone e chaves de API.
+
+### 12.5 Controle de acesso
+
+- **Autenticação local** com usuário e senha (Argon2id), bloqueio temporário após tentativas falhas e sessão que expira por inatividade.
+- **Papéis e permissões** em `role_permissions`, com efeito `ALLOW` ou `DENY`. A regra é *deny-overrides*: um `DENY` sempre vence. A view `v_effective_permissions` calcula o resultado.
+- **Escopo por linha (equivalente a RLS):** toda consulta da aplicação recebe o `warehouse_id` do usuário como parâmetro; um usuário nunca lê nem altera dados de outro armazém.
+- **A IA age em nome de alguém:** o direito efetivo da IA é a **interseção** entre o papel `agente_ia` e o papel de quem fez o pedido. Ela nunca tem mais permissão do que a pessoa.
+- **Segregação de funções:** quem pede uma operação crítica não pode aprová-la, e a IA nunca aprova.
+- A matriz completa de papéis, com os pontos de `DENY`, está em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md).
+
+### 12.6 Conexões ao banco
+
+O SQLite não tem usuários de banco, então o isolamento é feito por conexões com poderes diferentes:
+
+| Conexão | Usada por | Modo | Restrições |
+|---------|-----------|------|------------|
+| Leitura da IA | Ferramentas de leitura do Planner | `Mode=ReadOnly` | *Authorizer callback* (`sqlite3_set_authorizer`): só lê tabelas através das views `v_ai_*`, nega colunas sensíveis e qualquer escrita, DDL, `ATTACH` ou `PRAGMA` |
+| Executor | Motor determinístico | Leitura e escrita | Só executa operações do catálogo da DSL, com consultas parametrizadas, dentro de transação |
+| Aplicação | Telas e policy engine | Leitura e escrita | Todas as consultas passam pelo policy engine (permissão + escopo por armazém) |
+
+O comportamento de referência do *authorizer* está implementado e testado em `db/tests/test_db.py`.
+
+### 12.7 Integridade e auditoria
+
+- **Triggers de banco** (`db/security.sql`) bloqueiam com `RAISE(ABORT, 'DENY: ...')`:
+  - UPDATE e DELETE em `audit_log` e `stock_movements`;
+  - alteração de planos finalizados e exclusão de qualquer plano;
+  - concessão de permissões proibidas ao papel da IA e remoção dos seus `DENY`;
+  - aprovação de plano pela IA ou pelo próprio solicitante.
+- **Auditoria encadeada:** cada linha de `audit_log` guarda o hash SHA-256 da linha anterior. Um job verifica a cadeia ao iniciar o app e periodicamente; qualquer quebra gera alerta ao administrador.
+- **O que é auditado:** login, cada chamada de ferramenta da IA (permitida ou negada), cada plano (submetido, rejeitado, aprovado, executado), mudanças de permissão e leituras de dados sensíveis.
+
+### 12.8 Defesa contra prompt injection
+
+Camadas, da mais externa para a mais interna:
+
+1. **Conteúdo é dado, não instrução:** descrições de produtos, documentos do RAG, memórias e resultados de ferramentas entram no prompt dentro de blocos delimitados e marcados como dados de referência. O prompt de sistema diz explicitamente que instruções dentro desses blocos devem ser ignoradas e relatadas.
+2. **Ferramentas limitadas pela skill:** a IA só vê as ferramentas da skill ativa.
+3. **Sem SQL e sem escrita direta:** a única forma de alterar dados é `submit_plan`, com operações de um catálogo fechado.
+4. **Validação determinística:** schema, regras de negócio e permissões (interseção IA ∩ usuário) são checados pelo código.
+5. **Aprovação humana** para todo plano de risco crítico, com o diff simulado em linguagem de negócio.
+6. **Banco:** mesmo que tudo acima falhe, a conexão da IA é somente leitura e os triggers bloqueiam as escritas proibidas.
+
+### 12.9 Defesa contra SQL injection
+
+- Toda consulta usa **parâmetros** (`$param` / `?`); concatenação de texto em SQL é proibida e verificada em revisão de código.
+- Identificadores dinâmicos (ordenação, filtros) vêm de listas fixas no código, nunca do usuário ou do LLM.
+- Argumentos de ferramentas são validados por JSON Schema (tipos, tamanhos, padrões como `^[A-Z]{3}-\d{3}$` para SKU) antes de chegar ao banco.
+- A conexão da IA nega statements de escrita mesmo que um texto malicioso chegue a ela.
+
+### 12.10 Segredos
+
+- Chaves de API, chave do SQLCipher e chave de colunas ficam no cofre do sistema operacional.
+- Nenhum segredo vai para o repositório: `.gitignore` bloqueia `.env*`, `*.key`, `*.pem` e arquivos `*.db`.
+- Os dados do repositório são todos fictícios.
+
+### 12.11 Testes de segurança
+
+- `db/tests/test_db.py`: imutabilidade, escalonamento de privilégio, interseção IA ∩ usuário, *authorizer* da IA, SQL injection e otimização.
+- Suíte de ataques de prompt injection e de SQL injection descrita em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), com métricas.
