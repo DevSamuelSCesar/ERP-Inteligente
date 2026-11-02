@@ -1,0 +1,55 @@
+# Roadmap
+
+Ordem de implementação das features do ERP Inteligente, derivada de [`references/ARQUITETURA.md`](references/ARQUITETURA.md). Cada feature só começa quando a anterior está testada. Sistemas interligados entram juntos na mesma feature.
+
+> Já pronto: schema, segurança, seed e testes do SQLite em `db/`, e a base de conhecimento em `knowledge/`.
+
+## Fundação
+
+### 1. Núcleo da aplicação e acesso ao banco
+Solução C#, app Avalonia (MVVM) com login e sessão, SQLCipher com chaves no cofre do SO, as três conexões (IA somente leitura com *authorizer*, Executor, Aplicação), policy engine (permissão + escopo por armazém) e auditoria encadeada por hash com verificação na inicialização.
+*Por que junto:* login, permissões, conexões e auditoria são a base de segurança de tudo que vem depois.
+
+### 2. Motor determinístico de planos
+DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (diff e risco), Approval (segregação de funções) e Executor transacional. Operações iniciais: `receive_goods`, `move_stock`, `create_product`, `create_location`. Operável sem LLM, por testes e por uma tela de pré-visualização do plano.
+*Por que junto:* Validator, Simulator, Approval e Executor formam um pipeline único e o catálogo de operações define os três.
+
+## Camada de IA
+
+### 3. Planner com tool calling
+`ILlmProvider` com adaptador Claude (OpenAI e DeepSeek depois), ferramentas de leitura sobre as views `v_ai_*`, `submit_plan` com devolução de erros estruturados e limite de tentativas, e tela de chat com prévia do plano e confirmação.
+*Por que junto:* o Planner só tem valor com as ferramentas de leitura e a tela de chat que o alimentam e exibem seu resultado.
+
+### 4. Skills e catálogo completo de operações
+Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`, junto com as operações `reserve_stock`, `pick_items`, `ship_order` e `adjust_stock` (críticas, com aprovação).
+*Por que junto:* cada skill depende das operações que ela permite.
+
+### 5. Memória e RAG
+Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.
+*Por que junto:* os dois são recuperação de texto livre no mesmo contexto do Planner e compartilham índices e delimitação anti-injection.
+
+## Segurança e economia
+
+### 6. Defesas de prompt injection e suíte de ataques
+Delimitação de conteúdo externo no prompt, relato de instruções suspeitas, filtro de logs sensíveis e a suíte automatizada de prompt injection e SQL injection com métricas.
+*Entra antes das receitas para que o que for promovido já nasça validado contra ataques.*
+
+### 7. Receitas
+Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com modelo barato, disparo direto pela UI sem LLM, invalidação por versão da DSL/skill e despromoção por falhas.
+
+## Evolução
+
+### 8. Multi-provedor e fine-tuning
+Adaptadores OpenAI e DeepSeek, modelo por papel configurável e experimento de fine-tuning do Matcher, que só substitui o Haiku se empatar ou superar no *exact match*.
+
+### 9. Operação
+Backup criptografado pela API do SQLite, job de manutenção de memórias, painel de auditoria e de custos de tokens, e instaladores por plataforma.
+
+## Resumo
+
+```
+1 Núcleo + acesso → 2 Motor de planos → 3 Planner + chat → 4 Skills + operações
+   → 5 Memória + RAG → 6 Defesas e ataques → 7 Receitas → 8 Multi-provedor + fine-tuning → 9 Operação
+```
+
+O MVP do [`CANVAS.md`](references/CANVAS.md) corresponde às features 1 a 3, às skills `recebimento` e `armazenagem` da 4, ao RAG da 5 e ao núcleo da 6. Receitas, fine-tuning, inventário e expedição ficam fora dele.

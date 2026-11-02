@@ -4,6 +4,7 @@
 erp_inteligente/
 ├── .gitignore        # Arquivos ignorados pelo git (segredos, bancos .db, PDFs gerados, builds)
 ├── CLAUDE.md         # Orientações para o Claude Code neste repositório
+├── ROADMAP.md        # Ordem de implementação das features, da fundação à operação
 ├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho
 │   ├── schema.sql    # Tabelas (STRICT), FTS5 de memórias e conhecimento, auditoria
