@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:erp_inteligente.ViewModels"
+        x:Class="erp_inteligente.Views.RejectReasonDialog"
+        x:DataType="vm:RejectReasonDialogViewModel"
+        Title="Rejeitar plano"
+        Width="460" SizeToContent="Height" CanResize="False"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+
+    <!-- Native dialog: the reason becomes a memory for the Planner -->
+    <StackPanel Margin="20" Spacing="10">
+        <TextBlock Classes="boardTitle" Text="Motivo da rejeição" />
+        <TextBox Name="ReasonBox" Text="{Binding Reason}" MaxLength="{Binding MaxLength}"
+                 AcceptsReturn="False" TextWrapping="Wrap" MinHeight="64" />
+        <TextBlock Classes="label" Text="{Binding RemainingText}" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,6,0,0">
+            <Button Classes="neutral" Content="Cancelar" IsCancel="True" Click="OnCancel" />
+            <Button Classes="neutral" Content="Confirmar rejeição" IsDefault="True"
+                    IsEnabled="{Binding CanConfirm}" Click="OnConfirm" />
+        </StackPanel>
+    </StackPanel>
+</Window>

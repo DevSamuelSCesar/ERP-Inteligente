@@ -1,0 +1,46 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="erp_inteligente.App"
+             xmlns:local="using:erp_inteligente"
+             xmlns:conv="using:erp_inteligente.Views.Converters"
+             xmlns:m="using:erp_inteligente.Models"
+             RequestedThemeVariant="Dark">
+    <!-- The Nexus has a single dark theme (references/UI.md, section 9). -->
+
+    <Application.DataTemplates>
+        <!-- Item of a totals strip -->
+        <DataTemplate DataType="m:SummaryTotal">
+            <StackPanel Margin="0,8,36,8" Spacing="0">
+                <TextBlock Classes="label" Text="{Binding Label}" />
+                <TextBlock Classes="totalValue" Text="{Binding Value}" />
+            </StackPanel>
+        </DataTemplate>
+        <local:ViewLocator />
+    </Application.DataTemplates>
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://erp_inteligente/Styles/Tokens.axaml" />
+                <ResourceInclude Source="avares://erp_inteligente/Styles/Icons.axaml" />
+                <ResourceInclude Source="avares://erp_inteligente/Styles/ButtonTheme.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <conv:IconKeyConverter x:Key="IconKeyConverter" />
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme>
+            <FluentTheme.Palettes>
+                <!-- Base palette for Fluent controls not restyled in Styles/Controls.axaml -->
+                <ColorPaletteResources x:Key="Dark"
+                                       Accent="#E01E3C"
+                                       RegionColor="#0E0F11"
+                                       BaseHigh="#F2F3F5"
+                                       ErrorText="#FF6B5E" />
+            </FluentTheme.Palettes>
+        </FluentTheme>
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
+        <StyleInclude Source="avares://erp_inteligente/Styles/Controls.axaml" />
+    </Application.Styles>
+</Application>

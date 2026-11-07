@@ -25,7 +25,11 @@ Embeddings do RAG: `text-embedding-3-small` (OpenAI) ou um modelo de embeddings 
 
 ## Testes dos scripts de banco
 
-Python 3 (biblioteca padrão `sqlite3` + `unittest`) testa os scripts de `db/` enquanto a aplicação C# não existe.
+Python 3 (biblioteca padrão `sqlite3` + `unittest`) testa os scripts de `db/`.
+
+## Testes do app
+
+xUnit v3 com `Avalonia.Headless.XUnit` (renderização Skia real) em `tests/Nexus.Tests`. Fonte da interface: família Barlow (SIL OFL) embutida em `Assets/Fonts`.
 
 ## Convenções
 

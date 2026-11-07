@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.NexusView"
+             x:DataType="vm:NexusViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
+        <Rectangle Grid.Row="0" Classes="rule" />
+
+        <!-- Transcript: full width, time and author on the left, no bubbles -->
+        <ScrollViewer Grid.Row="1" Name="TranscriptScroll" Padding="0,12,12,12">
+            <ItemsControl ItemsSource="{Binding Entries}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Spacing="14" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:TranscriptEntryViewModel">
+                        <Grid ColumnDefinitions="52,96,*">
+                            <TextBlock Grid.Column="0" Classes="tabular secondary" Text="{Binding TimeText}" Margin="0,1,0,0" />
+                            <TextBlock Grid.Column="1" Classes="label" Text="{Binding Author}" Margin="0,2,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                            <ContentControl Grid.Column="2" Content="{Binding Body}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Status line of the running task -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10" Margin="148,0,0,10"
+                    IsVisible="{Binding IsBusy}">
+            <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14" />
+            <TextBlock Classes="secondary" Text="{Binding StatusText}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Rectangle Grid.Row="3" Classes="rule" />
+
+        <!-- Request field: Enter sends, Shift+Enter breaks the line -->
+        <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+            <TextBox Name="RequestBox" Grid.Column="0"
+                     Text="{Binding Draft}"
+                     PlaceholderText="Pedido"
+                     AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="120" MaxLength="2000"
+                     IsEnabled="{Binding IsInputEnabled}"
+                     KeyDown="OnRequestKeyDown" />
+            <Button Grid.Column="1" Classes="primary" Margin="10,0,0,0" VerticalAlignment="Bottom" Height="32"
+                    Command="{Binding SendCommand}" ToolTip.Tip="Enviar (Enter)">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Enviar" VerticalAlignment="Center" />
+                    <PathIcon Data="{StaticResource Icon.Send}" Width="14" Height="14" />
+                </StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</UserControl>

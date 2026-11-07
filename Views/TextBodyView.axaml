@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.TextBodyView"
+             x:DataType="vm:TextBodyViewModel">
+    <Grid ColumnDefinitions="Auto,*">
+        <!-- Errors are a line with icon and text; no tinted box (references/UI.md, section 9.2) -->
+        <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Margin="0,2,8,0" VerticalAlignment="Top"
+                  IsVisible="{Binding IsError}" />
+        <SelectableTextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+    </Grid>
+</UserControl>

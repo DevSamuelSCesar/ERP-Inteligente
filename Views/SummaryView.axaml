@@ -1,0 +1,75 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.SummaryView"
+             x:DataType="vm:SummaryViewModel">
+
+    <!-- Built from the executor result; data palette only, never brand red (references/UI.md, section 6) -->
+    <StackPanel>
+        <Rectangle Classes="rule" />
+        <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" Margin="14,2,14,2" />
+        <Rectangle Classes="rule" />
+
+        <!-- move_stock: from/to flow with the quantity on each arrow -->
+        <ItemsControl ItemsSource="{Binding Flows}" Margin="14,12,14,12" IsVisible="{Binding HasFlows}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Spacing="10" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:MoveFlowLine">
+                    <Grid ColumnDefinitions="88,104,200,104" HorizontalAlignment="Left">
+                        <TextBlock Classes="tabular secondary" Text="{Binding Sku}" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Classes="location">
+                            <TextBlock Classes="tabular" Text="{Binding From}" HorizontalAlignment="Center" />
+                        </Border>
+                        <Grid Grid.Column="2" RowDefinitions="Auto,Auto" Margin="8,0" VerticalAlignment="Center">
+                            <TextBlock Classes="tabular" Text="{Binding Quantity}" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource Data1Brush}" FontWeight="SemiBold" />
+                            <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
+                                <Rectangle Height="2" Fill="{DynamicResource Data1Brush}" VerticalAlignment="Center" />
+                                <PathIcon Grid.Column="1" Data="{StaticResource Icon.Arrow}" Width="12" Height="12"
+                                          Margin="-2,0,0,0" Foreground="{DynamicResource Data1Brush}" />
+                            </Grid>
+                        </Grid>
+                        <Border Grid.Column="3" Classes="location">
+                            <TextBlock Classes="tabular" Text="{Binding To}" HorizontalAlignment="Center" />
+                        </Border>
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- adjust_stock: balance before (Data5) and after (Data1) -->
+        <StackPanel Margin="14,12,14,12" Spacing="10" IsVisible="{Binding HasBalances}">
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Rectangle Width="10" Height="10" Fill="{DynamicResource Data5Brush}" />
+                    <TextBlock Classes="label" Text="Antes" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Rectangle Width="10" Height="10" Fill="{DynamicResource Data1Brush}" />
+                    <TextBlock Classes="label" Text="Depois" />
+                </StackPanel>
+            </StackPanel>
+            <ItemsControl ItemsSource="{Binding Balances}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:BalanceBarLine">
+                        <Grid ColumnDefinitions="160,Auto" RowDefinitions="Auto,Auto" Margin="0,0,0,6">
+                            <TextBlock Grid.RowSpan="2" Classes="tabular" Text="{Binding Label}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                <Rectangle Height="10" Width="{Binding BeforeWidth}" Fill="{DynamicResource Data5Brush}" />
+                                <TextBlock Classes="tabular secondary" Text="{Binding BeforeText}" />
+                            </StackPanel>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="0,3,0,0">
+                                <Rectangle Height="10" Width="{Binding AfterWidth}" Fill="{DynamicResource Data1Brush}" />
+                                <TextBlock Classes="tabular" Text="{Binding AfterText}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

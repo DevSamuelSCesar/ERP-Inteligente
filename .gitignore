@@ -21,6 +21,8 @@ tmp/
 .cache/
 
 # Dependências e builds
+bin/
+obj/
 node_modules/
 dist/
 build/

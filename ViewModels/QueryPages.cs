@@ -1,0 +1,101 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using erp_inteligente.Models;
+using erp_inteligente.Services;
+
+namespace erp_inteligente.ViewModels;
+
+public sealed class StockViewModel(IQueryService queries, TimeProvider time) : QueryPageViewModel<StockRow>
+{
+    /// <summary>Lots expiring within this many days are counted in the totals strip.</summary>
+    public const int ExpiryWindowDays = 30;
+
+    public override string Title => "Estoque";
+    public override string FilterPlaceholder => "Filtrar por SKU, produto, endereço ou lote";
+
+    protected override Task<IReadOnlyList<StockRow>> LoadAsync() => queries.GetStockAsync();
+
+    protected override IEnumerable<string> SearchableText(StockRow row) => [row.Sku, row.Product, row.Location, row.Lot];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<StockRow> rows)
+    {
+        var today = DateOnly.FromDateTime(time.GetLocalNow().Date);
+        yield return new("Saldo total", rows.Sum(r => r.Quantity).ToString("N0"));
+        yield return new("Reservado", rows.Sum(r => r.Reserved).ToString("N0"));
+        yield return new("SKUs", rows.Select(r => r.Sku).Distinct().Count().ToString());
+        yield return new("Endereços ocupados", rows.Select(r => r.Location).Distinct().Count().ToString());
+        yield return new($"Lotes a vencer em {ExpiryWindowDays} dias",
+            rows.Count(r => r.ExpiresOn is { } d && d.DayNumber - today.DayNumber <= ExpiryWindowDays).ToString());
+    }
+}
+
+public sealed class LocationsViewModel(IQueryService queries) : QueryPageViewModel<LocationRow>
+{
+    public override string Title => "Endereços";
+    public override string FilterPlaceholder => "Filtrar por endereço ou zona";
+
+    protected override Task<IReadOnlyList<LocationRow>> LoadAsync() => queries.GetLocationsAsync();
+
+    protected override IEnumerable<string> SearchableText(LocationRow row) => [row.Code, row.Zone];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<LocationRow> rows)
+    {
+        yield return new("Endereços", rows.Count.ToString());
+        yield return new("Capacidade", rows.Sum(r => r.Capacity).ToString("N0"));
+        yield return new("Ocupado", rows.Sum(r => r.Occupied).ToString("N0"));
+        yield return new("Vazios", rows.Count(r => r.Occupied == 0).ToString());
+    }
+}
+
+public sealed class OrdersViewModel(IQueryService queries) : QueryPageViewModel<OrderRow>
+{
+    public override string Title => "Pedidos";
+    public override string FilterPlaceholder => "Filtrar por número, tipo, fornecedor ou cliente";
+
+    protected override Task<IReadOnlyList<OrderRow>> LoadAsync() => queries.GetOrdersAsync();
+
+    protected override IEnumerable<string> SearchableText(OrderRow row) => [row.Number, row.Kind, row.Party, row.Status];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<OrderRow> rows)
+    {
+        yield return new("Pedidos", rows.Count.ToString());
+        yield return new("Entrada", rows.Count(r => r.Kind == "Entrada").ToString());
+        yield return new("Saída", rows.Count(r => r.Kind == "Saída").ToString());
+        yield return new("Unidades", rows.Sum(r => r.Units).ToString("N0"));
+    }
+}
+
+public sealed class RecipesViewModel(IQueryService queries) : QueryPageViewModel<RecipeRow>
+{
+    public override string Title => "Receitas";
+    public override string FilterPlaceholder => "Filtrar por nome ou skill";
+
+    protected override Task<IReadOnlyList<RecipeRow>> LoadAsync() => queries.GetRecipesAsync();
+
+    protected override IEnumerable<string> SearchableText(RecipeRow row) => [row.Name, row.Skill, row.Description];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<RecipeRow> rows)
+    {
+        yield return new("Receitas ativas", rows.Count(r => r.Status == "Ativa").ToString());
+        yield return new("Execuções sem LLM", rows.Sum(r => r.Uses).ToString("N0"));
+    }
+}
+
+public sealed class AuditViewModel(IQueryService queries) : QueryPageViewModel<AuditRow>
+{
+    public override string Title => "Auditoria";
+    public override string FilterPlaceholder => "Filtrar por usuário, ação ou detalhe";
+
+    protected override Task<IReadOnlyList<AuditRow>> LoadAsync() => queries.GetAuditAsync();
+
+    protected override IEnumerable<string> SearchableText(AuditRow row) => [row.User, row.Action, row.Detail];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<AuditRow> rows)
+    {
+        yield return new("Eventos", rows.Count.ToString());
+        yield return new("Planos executados", rows.Count(r => r.Action == "Plano executado").ToString());
+        yield return new("Acessos negados", rows.Count(r => r.Action == "Acesso negado").ToString());
+    }
+}

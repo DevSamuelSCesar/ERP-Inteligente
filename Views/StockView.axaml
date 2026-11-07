@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.StockView"
+             x:DataType="vm:StockViewModel">
+
+    <!-- Read-only query screen: filter, totals strip, DataGrid (references/UI.md, section 7) -->
+    <Grid RowDefinitions="Auto,Auto,*">
+        <TextBox Grid.Row="0" Width="400" HorizontalAlignment="Left"
+                 Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
+        <StackPanel Grid.Row="1" Margin="0,12,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}">
+            <DataGrid.Columns>
+                <DataGridTextColumn x:DataType="m:StockRow" Header="SKU" Binding="{Binding Sku}" Width="100" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Produto" Binding="{Binding Product}" Width="*" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Endereço" Binding="{Binding Location}" Width="100" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Lote" Binding="{Binding Lot}" Width="110" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Validade" Binding="{Binding ExpiresOnText}" Width="100" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Qtd" Binding="{Binding Quantity}" Width="80" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Reservado" Binding="{Binding Reserved}" Width="104" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Disponível" Binding="{Binding Available}" Width="104" />
+                <DataGridTextColumn x:DataType="m:StockRow" Header="Un." Binding="{Binding Unit}" Width="60" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

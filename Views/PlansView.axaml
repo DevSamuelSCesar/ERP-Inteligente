@@ -1,0 +1,31 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.PlansView"
+             x:DataType="vm:PlansViewModel">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <StackPanel Grid.Row="0" Orientation="Horizontal">
+            <RadioButton Classes="tab" GroupName="PlanTabs" Content="Pendentes" IsChecked="{Binding ShowPendingOnly}" />
+            <RadioButton Classes="tab" GroupName="PlanTabs" Content="Todos" IsChecked="{Binding ShowAll}" />
+        </StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,8,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" MaxHeight="300">
+            <DataGrid.Columns>
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Plano" Binding="{Binding Number}" Width="80" />
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Criado em" Binding="{Binding CreatedText}" Width="140" />
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Solicitante" Binding="{Binding Requester}" Width="140" />
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Skill" Binding="{Binding Skill}" Width="140" />
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Risco" Binding="{Binding Risk}" Width="110" />
+                <DataGridTextColumn x:DataType="vm:PlanRow" Header="Status" Binding="{Binding Status}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+        <!-- The selected plan opens in the same board used by the Nexus -->
+        <ScrollViewer Grid.Row="3" Margin="0,14,0,0">
+            <ContentControl Content="{Binding SelectedBoard}" />
+        </ScrollViewer>
+    </Grid>
+</UserControl>

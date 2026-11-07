@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+    <StackPanel>
+        <Rectangle Classes="rule" />
+        <ItemsControl ItemsSource="{Binding Fields}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="m:SummaryTotal">
+                    <StackPanel>
+                        <Grid ColumnDefinitions="200,*" Margin="0,10">
+                            <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Center" />
+                            <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" />
+                        </Grid>
+                        <Rectangle Classes="rule" />
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</UserControl>
