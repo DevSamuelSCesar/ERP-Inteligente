@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using erp_inteligente.Core.Audit;
 using erp_inteligente.Models;
 using erp_inteligente.Services;
 
@@ -16,11 +17,16 @@ public sealed partial class ShellViewModel : ViewModelBase
     private readonly IPlanService _plans;
     private readonly NavigationItem? _plansItem;
 
+    /// <param name="auditStatus">Result of the hash-chain verification; a break is shown to users with <c>audit.read</c>.</param>
+    /// <param name="databaseDescription">Where the encrypted database lives, shown in Configurações.</param>
     public ShellViewModel(ISessionService session, IQueryService queries, IPlanService plans, INexusService nexus,
-        IDialogService dialogs, TimeProvider time)
+        IDialogService dialogs, TimeProvider time, AuditVerification auditStatus, string databaseDescription)
     {
         _user = session.Current;
         _plans = plans;
+        AuditAlert = !auditStatus.IsValid && _user.Has(Permissions.AuditRead)
+            ? $"Cadeia de auditoria quebrada na linha {auditStatus.FirstBrokenId}. Avise o administrador."
+            : null;
 
         NavigationItem[] menu =
         [
@@ -34,11 +40,11 @@ public sealed partial class ShellViewModel : ViewModelBase
         ];
         MenuItems = new ObservableCollection<NavigationItem>(menu.Where(IsAllowed));
         FooterItems = new ObservableCollection<NavigationItem>(
-            new NavigationItem[] { new("Configurações", "Settings", () => new SettingsViewModel(_user)) }.Where(IsAllowed));
+            new NavigationItem[] { new("Configurações", "Settings", () => new SettingsViewModel(_user, databaseDescription)) }.Where(IsAllowed));
 
         _plansItem = MenuItems.FirstOrDefault(i => i.IconKey == "Plans");
         _plans.PlanChanged += (_, _) => UpdatePendingBadge();
-        UpdatePendingBadge();
+        _ = RefreshPendingBadgeAsync();
 
         var first = MenuItems.FirstOrDefault() ?? FooterItems.FirstOrDefault();
         if (first is not null)
@@ -49,12 +55,17 @@ public sealed partial class ShellViewModel : ViewModelBase
     public ObservableCollection<NavigationItem> FooterItems { get; }
 
     public string UserName => _user.DisplayName;
-    public string UserDetail => $"{_user.RoleName} · {_user.WarehouseCode}";
+    public string UserDetail => $"{Capitalize(_user.RoleName)} · {_user.WarehouseCode}";
+
+    /// <summary>Shown above the content when the audit hash chain is broken; null otherwise.</summary>
+    public string? AuditAlert { get; }
+
+    public bool HasAuditAlert => AuditAlert is not null;
 
     [ObservableProperty]
     public partial PageViewModel? CurrentPage { get; private set; }
 
-    /// <summary>Raised when the user leaves; the view closes the window.</summary>
+    /// <summary>Raised when the user leaves; the app controller ends the session and shows the login.</summary>
     public event EventHandler? SignOutRequested;
 
     [RelayCommand]
@@ -72,6 +83,23 @@ public sealed partial class ShellViewModel : ViewModelBase
 
     [RelayCommand]
     private void SignOut() => SignOutRequested?.Invoke(this, EventArgs.Empty);
+
+    private async Task RefreshPendingBadgeAsync()
+    {
+        try
+        {
+            await _plans.RefreshAsync();
+            UpdatePendingBadge();
+        }
+        catch (Exception ex)
+        {
+            // The badge is informative only; the Planos screen reports load errors itself.
+            System.Diagnostics.Trace.TraceWarning("Pending badge refresh failed: {0}", ex.GetType().Name);
+        }
+    }
+
+    private static string Capitalize(string text) =>
+        text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     private bool IsAllowed(NavigationItem item) => item.RequiredAnyOf.Count == 0 || item.RequiredAnyOf.Any(_user.Has);
 

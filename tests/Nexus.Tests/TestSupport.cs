@@ -3,7 +3,7 @@ using Avalonia.Headless;
 using Avalonia.Media;
 using erp_inteligente;
 using erp_inteligente.Services;
-using erp_inteligente.Services.Demo;
+using Nexus.Tests.Fakes;
 
 [assembly: AvaloniaTestApplication(typeof(Nexus.Tests.TestAppBuilder))]
 

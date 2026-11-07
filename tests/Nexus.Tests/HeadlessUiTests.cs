@@ -16,9 +16,9 @@ public class HeadlessUiTests
     [AvaloniaFact]
     public async Task Every_menu_page_resolves_to_its_view()
     {
-        var window = new MainWindow();
-        var shell = App.CreateDemoShell(new FakeDialogService(), TimeSpan.Zero);
-        window.DataContext = shell;
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("sup.maria");
+        var window = new MainWindow { DataContext = shell };
         window.Show();
 
         foreach (var item in shell.MenuItems.Concat(shell.FooterItems))
@@ -34,20 +34,40 @@ public class HeadlessUiTests
     }
 
     [AvaloniaFact]
-    public async Task Nexus_request_renders_plan_board_and_summary()
+    public async Task Nexus_answers_stock_question_from_the_database()
     {
-        var window = new MainWindow();
-        var shell = App.CreateDemoShell(new FakeDialogService(), TimeSpan.Zero);
-        window.DataContext = shell;
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("op.joao");
+        var window = new MainWindow { DataContext = shell };
         window.Show();
         var nexus = Assert.IsType<NexusViewModel>(shell.CurrentPage);
 
-        nexus.Draft = "Guarde as 40 caixas do ABC-123 que estão na doca";
+        nexus.Draft = "qual o saldo do ABC-123?";
         await nexus.SendCommand.ExecuteAsync(null);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Contains(window.GetVisualDescendants(), v => v is PlanBoardView);
-        Assert.Contains(window.GetVisualDescendants(), v => v is SummaryView);
+        Assert.Contains(window.GetVisualDescendants().OfType<SelectableTextBlock>(), t => t.Text?.Contains("DOCA-01") == true);
+        Assert.DoesNotContain(window.GetVisualDescendants(), v => v is PlanBoardView);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Pending_plan_is_shown_read_only_until_the_engine_exists()
+    {
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("sup.maria");
+        var window = new MainWindow { DataContext = shell };
+        window.Show();
+
+        await shell.NavigateCommand.ExecuteAsync(shell.MenuItems.Single(i => i.Label == "Planos"));
+        Dispatcher.UIThread.RunJobs();
+
+        var board = Assert.Single(window.GetVisualDescendants().OfType<PlanBoardView>());
+        var viewModel = Assert.IsType<PlanBoardViewModel>(board.DataContext);
+        Assert.Equal(2, viewModel.PlanId);
+        Assert.False(viewModel.CanDecide);
+        Assert.Contains("motor de planos", viewModel.StatusText);
+        Assert.Equal(1, shell.MenuItems.Single(i => i.Label == "Planos").Badge);
         window.Close();
     }
 
@@ -56,11 +76,11 @@ public class HeadlessUiTests
     /// Fluent's light overlay on the content presenter must never show.
     /// </summary>
     [AvaloniaFact]
-    public void Send_button_is_neutral_when_empty_and_red_with_text()
+    public async Task Send_button_is_neutral_when_empty_and_red_with_text()
     {
-        var window = new MainWindow();
-        var shell = App.CreateDemoShell(new FakeDialogService(), TimeSpan.Zero);
-        window.DataContext = shell;
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("sup.maria");
+        var window = new MainWindow { DataContext = shell };
         window.Show();
         Dispatcher.UIThread.RunJobs();
         var nexus = Assert.IsType<NexusViewModel>(shell.CurrentPage);

@@ -1,6 +1,6 @@
 using erp_inteligente.Models;
 using erp_inteligente.Services;
-using erp_inteligente.Services.Demo;
+using Nexus.Tests.Fakes;
 
 namespace Nexus.Tests;
 

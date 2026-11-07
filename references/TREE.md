@@ -4,10 +4,14 @@
 erp_inteligente/
 ├── .gitignore        # Arquivos ignorados pelo git (segredos, bancos .db, PDFs gerados, bin/ e obj/)
 ├── CLAUDE.md         # Orientações para o Claude Code neste repositório
-├── erp_inteligente.csproj  # Projeto do app desktop (Avalonia 12, .NET 10, CommunityToolkit.Mvvm, DataGrid)
+├── erp_inteligente.csproj  # Projeto do app (Avalonia 12, .NET 10, MVVM Toolkit, DataGrid, Microsoft.Data.Sqlite + SQLCipher, Argon2); embute db/*.sql
 ├── app.manifest      # Manifesto Windows do executável
 ├── Program.cs        # Ponto de entrada: plataforma, Barlow como fonte padrão
-├── App.axaml(.cs)    # Aplicação: tema escuro, tokens, ícones, estilos; raiz de composição com serviços de demonstração
+├── App.axaml(.cs)    # Aplicação: tema, tokens, ícones, estilos; inicialização (caminho do banco, cofre, erro fatal)
+├── AppHost.cs        # Raiz de composição do núcleo: banco, auditoria, policy engine, autenticação, sessão e shell
+├── AppController.cs  # Alterna login e shell; renova a sessão com teclado/mouse e a encerra por inatividade ou saída
+├── IWindowHost.cs    # Abstração da janela principal e do encerramento (adaptador do lifetime desktop)
+├── StartupError.cs   # Mensagens ao operador para falhas de inicialização (chave ausente, cofre, banco ilegível)
 ├── ViewLocator.cs    # Resolve a View de cada ViewModel por convenção de nome
 ├── Assets/
 │   ├── Fonts/        # Família Barlow (SIL OFL, com OFL.txt): Regular, Medium, SemiBold, Condensed, Semi Condensed
@@ -17,25 +21,36 @@ erp_inteligente/
 │   ├── Icons.axaml   # Ícones próprios em StreamGeometry (navegação, ações, estados)
 │   ├── ButtonTheme.axaml  # ControlTheme próprio do Button (substitui o do Fluent, sem sobreposição translúcida)
 │   └── Controls.axaml  # Estilos: botões, navegação, abas, réguas, quadros, DataGrid; sem sombras nem transições
+├── Core/             # Núcleo da feature 1 do ROADMAP (seção 12 da ARQUITETURA)
+│   ├── Security/     # Cofre do SO (libsecret, DPAPI, memória), KeyManager, DatabaseKeys, ColumnCipher (AES-GCM), PasswordHasher (Argon2id)
+│   ├── Data/         # NexusDatabase (3 conexões SQLCipher), AiAuthorizer, DatabaseBootstrapper (cria o banco a partir de db/*.sql)
+│   ├── Audit/        # AuditEntry, AuditHasher (regra v1), AuditLog (append encadeado), AuditVerifier
+│   ├── Auth/         # AuthService (login, bloqueio, auditoria), SessionService (expiração por inatividade), LoginResult
+│   └── Policy/       # PolicyEngine (deny-overrides, interseção IA ∩ usuário), ApplicationDb (consultas com permissão e $warehouse_id)
 ├── Models/           # Plano, passos, status, resumo de execução, sessão, permissões e linhas das consultas
-├── Services/         # Interfaces da UI com o motor (planos, Nexus, consultas, sessão, diálogos) e ApprovalPolicy
-│   └── Demo/         # Implementações em memória com dados fictícios do seed, até existirem banco e LLM
-├── ViewModels/       # Shell e navegação, Nexus, quadro do plano, resumo visual, telas de consulta, Planos, diálogo
-├── Views/            # Janela principal, Nexus, quadro do plano, resumo, telas de consulta, diálogo de rejeição
+├── Services/         # Interfaces da UI com o núcleo (planos, Nexus, consultas, sessão, diálogos) e ApprovalPolicy
+│   └── Sqlite/       # Implementações reais: consultas por armazém, planos somente leitura, Nexus só de consulta (conexão da IA)
+├── ViewModels/       # Login, shell e navegação, Nexus, quadro do plano, resumo visual, telas de consulta, Planos, diálogo
+├── Views/            # Login, erro fatal, janela principal, Nexus, quadro do plano, resumo, telas de consulta, diálogo de rejeição
 │   └── Converters/   # IconKeyConverter (chave de ícone → geometria)
 ├── tests/
-│   └── Nexus.Tests/  # xUnit v3 + Avalonia Headless: política de aprovação, serviços, ViewModels, contraste, fontes, XAML
+│   └── Nexus.Tests/  # xUnit v3 + Avalonia Headless (Skia real)
+│       ├── Core/     # Testes do núcleo por módulo + TestDatabase (banco SQLCipher temporário) e ManualTimeProvider
+│       ├── Services/ # Testes dos serviços Sqlite (consultas, planos, Nexus, isolamento entre armazéns)
+│       ├── Fakes/    # Serviços em memória (antigos serviços de demonstração) para testar ViewModels do quadro de aprovação
+│       ├── TestApp.cs  # AppHost real sobre um TestDatabase, com login dos usuários do seed
+│       └── *.cs      # Fluxo login/shell/expiração, UI headless, ViewModels, contraste das cores, política de aprovação
 ├── ROADMAP.md        # Ordem de implementação das features, da fundação à operação
 ├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho
 │   ├── schema.sql    # Tabelas (STRICT), FTS5 de memórias e conhecimento, auditoria
 │   ├── security.sql  # Triggers DENY (imutabilidade, anti-escalonamento), permissões efetivas, views v_ai_* e mascaradas
-│   ├── seed.sql      # Carga inicial fictícia: papéis, usuários, armazém, estoque, planos, memórias
+│   ├── seed.sql      # Carga inicial fictícia: papéis, usuários (senha demo em Argon2id), armazém, estoque, planos, memórias, auditoria com hashes v1
 │   ├── volume.sql    # Gera 1 milhão de movimentos sintéticos para o benchmark
 │   ├── benchmark.sql # As duas consultas lentas (kardex e FEFO) com EXPLAIN QUERY PLAN e tempo
 │   ├── optimize.sql  # Índices que resolvem as consultas lentas
 │   └── tests/
-│       └── test_db.py  # Testes: imutabilidade, escalonamento, authorizer da IA, SQL injection, otimização
+│       └── test_db.py  # Testes: imutabilidade, escalonamento, authorizer da IA, SQL injection, otimização, cadeia de auditoria v1
 ├── tools/            # Utilitários do repositório
 │   ├── readme_to_pdf.py  # Converte o README.md (com diagramas Mermaid) em PDF via Chrome headless
 │   └── tests/

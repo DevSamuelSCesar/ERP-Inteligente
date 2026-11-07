@@ -276,9 +276,16 @@ A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DA
 ### 12.3 Proteção em repouso
 
 1. **Banco inteiro criptografado com SQLCipher** (AES-256). A chave é aleatória, gerada na instalação e guardada no cofre do sistema operacional: DPAPI no Windows, Keychain no macOS, Secret Service (libsecret) no Linux. Sem a chave, o arquivo `.db` copiado é ilegível.
+   - São duas chaves aleatórias de 32 bytes por banco: a do SQLCipher e a das colunas. No cofre, cada uma é identificada pelo caminho absoluto do arquivo `.db` e pelo nome (`sqlcipher` ou `column`). No Linux usa o schema libsecret `app.nexus.erp`, com os atributos `db` e `key`.
+   - O SQLCipher abre com a chave bruta (`PRAGMA key = "x'<hex>'"`), sem derivação por senha.
+   - Se o arquivo `.db` existe e a chave não está no cofre, o app para com erro e **nunca** gera uma chave nova, porque isso tornaria os dados irrecuperáveis.
+   - Estado atual: Linux (libsecret) e Windows (DPAPI) implementados; o macOS (Keychain) ainda falha com erro explícito.
 2. **Colunas sensíveis (`*_enc`) com AES-256-GCM** na aplicação, com uma segunda chave, também no cofre do sistema. Cada valor guarda nonce e tag de autenticação; um valor adulterado falha na leitura.
+   - Formato do valor: `0x01` (versão) | nonce de 12 bytes | texto cifrado | tag de 16 bytes.
+   - Dados associados (AAD): `"{tabela}.{coluna}#{id}"`. Um valor copiado para outra linha ou coluna também falha na leitura.
 3. **Mascaramento:** colunas `*_masked` e as views `v_*_masked` mostram só parte do dado (ex.: `**.***.***/0001-**`) para quem não tem `sensitive.read`.
-4. **Senhas** guardadas apenas como hash Argon2id.
+4. **Senhas** guardadas apenas como hash Argon2id, no formato PHC `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>` (64 MiB, 3 iterações, paralelismo 4, conforme a RFC 9106; salt de 16 bytes e hash de 32 bytes).
+   - A verificação usa os parâmetros gravados na própria string, compara em tempo constante e recusa parâmetros fora de limites seguros (proteção contra uma linha adulterada que force um custo absurdo).
 5. **Backups** feitos pela API de backup do SQLite a partir do banco aberto com SQLCipher, então continuam criptografados.
 
 ### 12.4 Proteção em trânsito e minimização
@@ -289,7 +296,12 @@ A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DA
 
 ### 12.5 Controle de acesso
 
-- **Autenticação local** com usuário e senha (Argon2id), bloqueio temporário após tentativas falhas e sessão que expira por inatividade.
+- **Autenticação local** com usuário e senha (Argon2id), bloqueio temporário após tentativas falhas e sessão que expira por inatividade:
+  - **Bloqueio:** 5 falhas seguidas bloqueiam o usuário por 15 minutos (`users.failed_attempts`, `users.locked_until`). Um login correto zera o contador.
+  - **Mensagem única:** a resposta é sempre "Usuário ou senha inválidos", exista o usuário ou não. Usuário inexistente também passa por uma verificação Argon2 falsa, para que o tempo de resposta não revele quem existe.
+  - **Contas que não fazem login:** usuários inativos e a conta de serviço da IA (`svc.ia`).
+  - **Sessão:** expira após 15 minutos sem interação de teclado ou mouse e volta à tela de login.
+  - **Auditoria:** login, falha, bloqueio, saída e expiração geram eventos em `audit_log`.
 - **Papéis e permissões** em `role_permissions`, com efeito `ALLOW` ou `DENY`. A regra é *deny-overrides*: um `DENY` sempre vence. A view `v_effective_permissions` calcula o resultado.
 - **Escopo por linha (equivalente a RLS):** toda consulta da aplicação recebe o `warehouse_id` do usuário como parâmetro; um usuário nunca lê nem altera dados de outro armazém.
 - **A IA age em nome de alguém:** o direito efetivo da IA é a **interseção** entre o papel `agente_ia` e o papel de quem fez o pedido. Ela nunca tem mais permissão do que a pessoa.
@@ -306,7 +318,17 @@ O SQLite não tem usuários de banco, então o isolamento é feito por conexões
 | Executor | Motor determinístico | Leitura e escrita | Só executa operações do catálogo da DSL, com consultas parametrizadas, dentro de transação |
 | Aplicação | Telas e policy engine | Leitura e escrita | Todas as consultas passam pelo policy engine (permissão + escopo por armazém) |
 
-O comportamento de referência do *authorizer* está implementado e testado em `db/tests/test_db.py`.
+O comportamento de referência do *authorizer* está implementado e testado em `db/tests/test_db.py` e foi portado para C# em `Core/Data`. A versão C# também nega a função `load_extension`.
+
+Regras comuns às três conexões:
+- São abertas sem pool. A chave do SQLCipher é aplicada logo após a abertura e validada com uma leitura de `sqlite_master` antes de qualquer uso.
+- As conexões de escrita ligam `foreign_keys`.
+- A da IA instala o *authorizer* depois da chave. Como ele nega `BEGIN`, a conexão da IA nunca abre transação.
+
+No policy engine (`Core/Policy`):
+- Consultas por armazém precisam conter o parâmetro `$warehouse_id`, que o próprio engine preenche com o armazém da sessão. Uma consulta sem esse parâmetro é recusada antes de chegar ao banco.
+- Consultas de catálogo sem armazém usam uma chamada separada e explícita.
+- Toda permissão negada lança exceção e gera um evento `denied` na auditoria.
 
 ### 12.7 Integridade e auditoria
 
@@ -316,6 +338,13 @@ O comportamento de referência do *authorizer* está implementado e testado em `
   - concessão de permissões proibidas ao papel da IA e remoção dos seus `DENY`;
   - aprovação de plano pela IA ou pelo próprio solicitante.
 - **Auditoria encadeada:** cada linha de `audit_log` guarda o hash SHA-256 da linha anterior. Um job verifica a cadeia ao iniciar o app e periodicamente; qualquer quebra gera alerta ao administrador.
+  - **Regra v1 do hash:** `hash` = SHA-256 em hexadecimal minúsculo dos bytes UTF-8 de
+    `"nexus-audit-v1\n" + prev_hash + "\n" + F(id) F(occurred_at) F(actor_type) F(actor_id) F(on_behalf_of) F(action) F(target) F(outcome) F(details_json)`,
+    em que `F(nulo) = "-;"` e `F(v) = <tamanho de v em bytes UTF-8> + ":" + v + ";"` (inteiros em decimal).
+  - A primeira linha tem `prev_hash = "GENESIS"`, e cada linha seguinte guarda o `hash` da anterior (ordem por `id`).
+  - O escritor insere com `BEGIN IMMEDIATE`, com `id` e `occurred_at` (`AAAA-MM-DDTHH:MM:SSZ`, UTC) explícitos, para que o hash seja calculado sobre os mesmos valores gravados.
+  - Há implementações de referência iguais em Python (`db/tests/test_db.py`) e C# (`Core/Audit`); as linhas do seed já têm os hashes reais.
+  - O alerta de quebra aparece no app para quem tem `audit.read`, indicando a primeira linha inválida.
 - **O que é auditado:** login, cada chamada de ferramenta da IA (permitida ou negada), cada plano (submetido, rejeitado, aprovado, executado), mudanças de permissão e leituras de dados sensíveis.
 
 ### 12.8 Defesa contra prompt injection

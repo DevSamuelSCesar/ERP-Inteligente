@@ -41,6 +41,10 @@ CREATE TABLE users (
     role_id       INTEGER NOT NULL REFERENCES roles (id),
     warehouse_id  INTEGER REFERENCES warehouses (id),
     is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+    -- Login lockout, enforced by the application: 5 consecutive failures lock the user for 15 minutes.
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),  -- consecutive failed logins
+    locked_until    TEXT,  -- UTC 'YYYY-MM-DDTHH:MM:SSZ' until which login is refused; NULL when not locked
+    last_login_at   TEXT,  -- UTC timestamp of the last successful login
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 ) STRICT;
 
@@ -268,7 +272,7 @@ CREATE TRIGGER knowledge_fts_delete AFTER DELETE ON knowledge_chunks BEGIN
 END;
 
 -- ---------------------------------------------------------------------------
--- Audit (append-only, hash-chained by the application: hash = SHA-256(prev_hash || canonical row))
+-- Audit (append-only, hash-chained by the application with rule v1: see audit_hash_v1 in db/tests/test_db.py)
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE audit_log (

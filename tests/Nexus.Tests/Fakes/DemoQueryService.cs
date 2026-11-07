@@ -2,8 +2,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using erp_inteligente.Models;
+using erp_inteligente.Services;
 
-namespace erp_inteligente.Services.Demo;
+namespace Nexus.Tests.Fakes;
 
 public sealed class DemoQueryService(DemoData data) : IQueryService
 {

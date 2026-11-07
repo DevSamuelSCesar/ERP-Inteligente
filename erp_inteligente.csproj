@@ -10,6 +10,14 @@
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
 
+  <!-- SQL scripts applied by DatabaseBootstrapper when a new database is created -->
+  <ItemGroup>
+    <EmbeddedResource Include="db\schema.sql" LogicalName="Nexus.Db.schema.sql" />
+    <EmbeddedResource Include="db\security.sql" LogicalName="Nexus.Db.security.sql" />
+    <EmbeddedResource Include="db\seed.sql" LogicalName="Nexus.Db.seed.sql" />
+    <EmbeddedResource Include="db\optimize.sql" LogicalName="Nexus.Db.optimize.sql" />
+  </ItemGroup>
+
   <!-- The test project lives under tests/ and must not be compiled into the app. -->
   <ItemGroup>
     <Compile Remove="tests\**" />
@@ -32,5 +40,9 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 </Project>

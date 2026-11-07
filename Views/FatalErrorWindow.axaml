@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="erp_inteligente.Views.FatalErrorWindow"
+        Title="Nexus"
+        Width="480" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterScreen">
+
+    <!-- Startup failure: plain message, no technical details or key material -->
+    <StackPanel Margin="28" Spacing="14">
+        <Grid ColumnDefinitions="Auto,*">
+            <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="16" Height="16"
+                      Margin="0,4,12,0" VerticalAlignment="Top" />
+            <StackPanel Grid.Column="1" Spacing="6">
+                <TextBlock Classes="boardTitle" Text="O Nexus não pôde iniciar" />
+                <SelectableTextBlock Name="MessageText" TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+        <Button Classes="neutral" Content="Fechar" HorizontalAlignment="Right" IsDefault="True" IsCancel="True"
+                Click="OnClose" />
+    </StackPanel>
+</Window>

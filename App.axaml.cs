@@ -1,9 +1,11 @@
 using System;
+using System.Diagnostics;
+using System.IO;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using erp_inteligente.Services.Demo;
-using erp_inteligente.ViewModels;
+using erp_inteligente.Core.Security;
 using erp_inteligente.Views;
 
 namespace erp_inteligente;
@@ -19,28 +21,40 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var window = new MainWindow();
-            window.DataContext = CreateDemoShell(new DialogService(window));
-            desktop.MainWindow = window;
+            // The controller decides when to quit, since windows are swapped between login and shell.
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try
+            {
+                var host = AppHost.Open(ResolveDatabasePath(desktop.Args), SecretStores.ForCurrentPlatform());
+                desktop.Exit += (_, _) => host.Dispose();
+                new AppController(new DesktopWindowHost(desktop), host).Start();
+            }
+            catch (Exception ex)
+            {
+                Trace.TraceError("Startup failed: {0}", ex.GetType().Name);
+                var window = new FatalErrorWindow(StartupError.Describe(ex));
+                window.Closed += (_, _) => desktop.Shutdown();
+                desktop.MainWindow = window;
+                window.Show();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
     /// <summary>
-    /// Composition root of the UI-only build: in-memory fictitious data and a keyword-based Nexus
-    /// replace the SQLite layer and the LLM Planner until those features exist (ROADMAP.md).
+    /// <c>--db &lt;file&gt;</c> selects the database; otherwise the per-user data folder is used
+    /// (e.g. ~/.local/share/Nexus/nexus.db on Linux, %LOCALAPPDATA%\Nexus\nexus.db on Windows).
     /// </summary>
-    internal static ShellViewModel CreateDemoShell(Services.IDialogService dialogs, TimeSpan? nexusStepDelay = null)
+    internal static string ResolveDatabasePath(string[]? args)
     {
-        var time = TimeProvider.System;
-        var data = new DemoData(time);
-        return new ShellViewModel(
-            new DemoSessionService(DemoSessionService.Supervisor),
-            new DemoQueryService(data),
-            new DemoPlanService(data),
-            new DemoNexusService(data, nexusStepDelay ?? TimeSpan.FromMilliseconds(350)),
-            dialogs,
-            time);
+        if (args is not null)
+        {
+            var index = Array.IndexOf(args, "--db");
+            if (index >= 0 && index + 1 < args.Length && args[index + 1].Length > 0)
+                return Path.GetFullPath(args[index + 1]);
+        }
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nexus", "nexus.db");
     }
 }

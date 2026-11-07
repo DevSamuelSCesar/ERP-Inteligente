@@ -6,9 +6,10 @@ Ordem de implementação das features do Nexus, derivada de [`references/ARQUITE
 
 ## Fundação
 
-### 1. Núcleo da aplicação e acesso ao banco
+### 1. Núcleo da aplicação e acesso ao banco ✅
 Solução C#, app Avalonia (MVVM) com login e sessão, SQLCipher com chaves no cofre do SO, as três conexões (IA somente leitura com *authorizer*, Executor, Aplicação), policy engine (permissão + escopo por armazém) e auditoria encadeada por hash com verificação na inicialização.
 *Por que junto:* login, permissões, conexões e auditoria são a base de segurança de tudo que vem depois.
+*Estado:* pronto. Código em `Core/`, telas lendo o banco real por `Services/Sqlite/`. O cofre do macOS (Keychain) ainda não é suportado.
 
 ### 2. Motor determinístico de planos
 DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (diff e risco), Approval (segregação de funções) e Executor transacional. Operações iniciais: `receive_goods`, `move_stock`, `create_product`, `create_location`. Operável sem LLM, por testes e por uma tela de pré-visualização do plano.

@@ -13,6 +13,12 @@ public interface IPlanService
 {
     IReadOnlyList<Plan> Plans { get; }
 
+    /// <summary>False until the deterministic engine exists (ROADMAP.md, feature 2): plans are read-only.</summary>
+    bool IsEngineAvailable { get; }
+
+    /// <summary>Reloads <see cref="Plans"/> from the source of truth.</summary>
+    Task RefreshAsync();
+
     /// <summary>Raised on the UI thread whenever a plan is added or changes status.</summary>
     event EventHandler<Plan>? PlanChanged;
 

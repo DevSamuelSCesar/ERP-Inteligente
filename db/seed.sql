@@ -1,7 +1,8 @@
 -- ERP Inteligente: initial load with FICTITIOUS data only (apply after schema.sql and security.sql).
 -- No real people, companies or documents. Sensitive *_enc columns stay NULL here: the application
 -- encrypts and fills them; masked columns hold already-masked fictitious values.
--- Audit hashes are placeholders; the application computes the real SHA-256 chain.
+-- Audit rows carry real v1 hashes (rule in audit_hash_v1, db/tests/test_db.py); the application
+-- extends the chain for new rows with the same rule.
 
 PRAGMA foreign_keys = ON;
 
@@ -59,11 +60,13 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
 
 INSERT INTO warehouses (id, code, name) VALUES (1, 'CD-01', 'Centro de Distribuição Fictício 01');
 
+-- Demo password for every human user: nexus-demo-2026 (documented in README.md; fictitious data only).
+-- Argon2id PHC hashes, m=64 MiB, t=3, p=4 (references/ARQUITETURA.md, section 12.3). svc.ia never logs in.
 INSERT INTO users (id, username, display_name, password_hash, role_id, warehouse_id) VALUES
-    (1, 'op.joao',   'João (operador)',      'argon2id$FICTICIO$op.joao',   1, 1),
-    (2, 'sup.maria', 'Maria (supervisora)',  'argon2id$FICTICIO$sup.maria', 2, 1),
-    (3, 'adm.carlos','Carlos (administrador)','argon2id$FICTICIO$adm.carlos',3, 1),
-    (4, 'aud.lucia', 'Lúcia (auditora)',     'argon2id$FICTICIO$aud.lucia', 4, 1),
+    (1, 'op.joao',   'João (operador)',      '$argon2id$v=19$m=65536,t=3,p=4$4H3UK/Bmc+aoDlJBaqyenA$qVxvHSzAzpt4OnIntR3nD14T/SSD/TSRo8ARXm5bBeU',   1, 1),
+    (2, 'sup.maria', 'Maria (supervisora)',  '$argon2id$v=19$m=65536,t=3,p=4$qDb4i5a/Q7pRKB42TQvh7w$74hTtoahWJTTZBGVt9YVSrP/0x9IAX6vNU5PALEeOsY', 2, 1),
+    (3, 'adm.carlos','Carlos (administrador)','$argon2id$v=19$m=65536,t=3,p=4$u6+exbn+H/J0CbgXzHqQEw$P0rgm1gX3qvwNfWyTdpvZxeE8y5m97oCUwztYYvS9pk',3, 1),
+    (4, 'aud.lucia', 'Lúcia (auditora)',     '$argon2id$v=19$m=65536,t=3,p=4$LCPw3cwEL2flFKGWlwGyBw$gc8yzrgocnj440mK4A6E76EjX/64uAT8rkpzLrDISXs', 4, 1),
     (5, 'svc.ia',    'Agente IA',            'service-account:no-password', 5, 1);
 
 INSERT INTO zones (id, warehouse_id, code, name) VALUES
@@ -191,10 +194,10 @@ INSERT INTO memories (kind, scope, scope_ref, content, confidence, use_count) VA
     ('pattern', 'supplier', '3', 'Laticínios Fictícios Gama costuma entregar entre 7h e 8h; priorizar doca DOCA-02.', 0.6, 2),
     ('fact', 'global', NULL, 'Ajustes de estoque exigem motivo e aprovação de supervisor.', 1.0, 20);
 
-INSERT INTO audit_log (occurred_at, actor_type, actor_id, on_behalf_of, action, target, outcome, details_json, prev_hash, hash) VALUES
-    ('2026-10-20T10:01:00Z', 'ai',   5, 1, 'plan.submit',  'plan:1', 'allowed', '{"risk":"reversible"}', 'GENESIS', 'seed-placeholder-0001'),
-    ('2026-10-20T10:02:00Z', 'system', NULL, 1, 'plan.execute', 'plan:1', 'allowed', '{"steps":1}', 'seed-placeholder-0001', 'seed-placeholder-0002'),
-    ('2026-10-26T08:05:00Z', 'ai',   5, 1, 'plan.submit',  'plan:2', 'allowed', '{"risk":"critical","status":"pending_approval"}', 'seed-placeholder-0002', 'seed-placeholder-0003'),
-    ('2026-10-26T08:06:00Z', 'ai',   5, 1, 'stock.adjust', 'sku:TST-INJ-01', 'denied', '{"reason":"AI role DENY stock.adjust"}', 'seed-placeholder-0003', 'seed-placeholder-0004');
+INSERT INTO audit_log (id, occurred_at, actor_type, actor_id, on_behalf_of, action, target, outcome, details_json, prev_hash, hash) VALUES
+    (1, '2026-10-20T10:01:00Z', 'ai',   5, 1, 'plan.submit',  'plan:1', 'allowed', '{"risk":"reversible"}', 'GENESIS', 'e623a8c643ea4c39a3525198ecb9b787f9837183d3359f58978fe47e98bf8fb9'),
+    (2, '2026-10-20T10:02:00Z', 'system', NULL, 1, 'plan.execute', 'plan:1', 'allowed', '{"steps":1}', 'e623a8c643ea4c39a3525198ecb9b787f9837183d3359f58978fe47e98bf8fb9', '7712970a230c0369dd865e65d397dae23d10063b0ab010280ac28ddc6aa2e941'),
+    (3, '2026-10-26T08:05:00Z', 'ai',   5, 1, 'plan.submit',  'plan:2', 'allowed', '{"risk":"critical","status":"pending_approval"}', '7712970a230c0369dd865e65d397dae23d10063b0ab010280ac28ddc6aa2e941', '0fccc1391146c1f5ff1a34c04e878beca6d18960c532138eec326816eeb5b364'),
+    (4, '2026-10-26T08:06:00Z', 'ai',   5, 1, 'stock.adjust', 'sku:TST-INJ-01', 'denied', '{"reason":"AI role DENY stock.adjust"}', '0fccc1391146c1f5ff1a34c04e878beca6d18960c532138eec326816eeb5b364', '9a69f1ea1772b917e4b897ac789b3b4fea63a484e896137f661e792a213e4b77');
 
 COMMIT;

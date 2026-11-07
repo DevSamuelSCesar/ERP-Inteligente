@@ -1,5 +1,6 @@
+using erp_inteligente.Core.Audit;
 using erp_inteligente.Models;
-using erp_inteligente.Services.Demo;
+using Nexus.Tests.Fakes;
 using erp_inteligente.ViewModels;
 
 namespace Nexus.Tests;
@@ -7,7 +8,8 @@ namespace Nexus.Tests;
 public class ViewModelTests
 {
     private static ShellViewModel Shell(DemoWorld w, UserSession user, FakeDialogService? dialogs = null) =>
-        new(new DemoSessionService(user), w.Queries, w.Plans, w.Nexus, dialogs ?? new FakeDialogService(), TimeProvider.System);
+        new(new DemoSessionService(user), w.Queries, w.Plans, w.Nexus, dialogs ?? new FakeDialogService(), TimeProvider.System,
+            new AuditVerification(true, 0, null, null), "banco de teste");
 
     private static NexusViewModel Nexus(DemoWorld w, UserSession user) =>
         new(user, w.Nexus, w.Plans, new FakeDialogService(), TimeProvider.System);

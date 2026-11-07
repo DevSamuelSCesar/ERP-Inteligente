@@ -96,6 +96,6 @@ public sealed class AuditViewModel(IQueryService queries) : QueryPageViewModel<A
     {
         yield return new("Eventos", rows.Count.ToString());
         yield return new("Planos executados", rows.Count(r => r.Action == "Plano executado").ToString());
-        yield return new("Acessos negados", rows.Count(r => r.Action == "Acesso negado").ToString());
+        yield return new("Eventos negados", rows.Count(r => r.IsDenied).ToString());
     }
 }

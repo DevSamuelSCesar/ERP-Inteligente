@@ -6,6 +6,7 @@ The AI connection authorizer below is the reference behaviour the C# application
 (SQLitePCLRaw sqlite3_set_authorizer): read-only, v_ai_* views only, no sensitive columns.
 """
 
+import hashlib
 import pathlib
 import shutil
 import sqlite3
@@ -65,6 +66,47 @@ def ai_is_allowed(conn, on_behalf_role_id, permission):
     return is_allowed(conn, AI_ROLE_ID, permission) and is_allowed(conn, on_behalf_role_id, permission)
 
 
+# Audit hash chain, rule "v1" (reference for the C# application).
+AUDIT_GENESIS = "GENESIS"
+AUDIT_HASHED_FIELDS = ("id", "occurred_at", "actor_type", "actor_id", "on_behalf_of",
+                       "action", "target", "outcome", "details_json")
+
+
+def _audit_field(value):
+    """None becomes "-;"; any other value becomes "<UTF-8 byte length>:<text>;"."""
+    if value is None:
+        return "-;"
+    text = str(value)
+    return f"{len(text.encode('utf-8'))}:{text};"
+
+
+def audit_hash_v1(prev_hash, row):
+    """Lowercase hex SHA-256 of "nexus-audit-v1\\n" + prev_hash + "\\n" + the fields of the row.
+
+    row is a sequence of 9 values in AUDIT_HASHED_FIELDS order, or a dict with those keys.
+    """
+    if isinstance(row, dict):
+        row = [row[name] for name in AUDIT_HASHED_FIELDS]
+    canonical = "nexus-audit-v1\n" + prev_hash + "\n" + "".join(_audit_field(v) for v in row)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def verify_audit_chain(conn):
+    """Return (ok, first_broken_id, reason), walking audit_log ordered by id."""
+    rows = conn.execute(
+        "SELECT id, occurred_at, actor_type, actor_id, on_behalf_of, action, target, outcome, "
+        "details_json, prev_hash, hash FROM audit_log ORDER BY id").fetchall()
+    expected_prev = AUDIT_GENESIS
+    for row in rows:
+        row_id, prev_hash, stored_hash = row[0], row[9], row[10]
+        if prev_hash != expected_prev:
+            return False, row_id, "prev_hash does not match the previous row's hash"
+        if audit_hash_v1(prev_hash, row[:9]) != stored_hash:
+            return False, row_id, "hash does not match the recomputed value"
+        expected_prev = stored_hash
+    return True, None, None
+
+
 class DatabaseTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -119,6 +161,52 @@ class ImmutabilityTests(DatabaseTestCase):
             self.conn.execute(
                 "INSERT INTO stock_movements (warehouse_id, product_id, from_location_id, kind, quantity) "
                 "VALUES (1, 1, 3, 'adjust', -5)")
+
+
+class AuditChainTests(DatabaseTestCase):
+    # Known-answer vector for rule v1. Canonical text (UTF-8, newlines are literal):
+    #   nexus-audit-v1\nGENESIS\n1:7;20:2026-11-07T12:00:00Z;4:user;1:1;-;10:stock.move;11:sku:ABC-123;7:allowed;9:{"qty":2};
+    KAT_ROW = (7, "2026-11-07T12:00:00Z", "user", 1, None, "stock.move", "sku:ABC-123", "allowed", '{"qty":2}')
+    KAT_HASH = "344c473b21c5e78f8e4fd28a95096cb3057c37a68fd33e172a3179a3677c63b5"
+
+    # Non-ASCII target ('endereço' is 8 characters but 9 UTF-8 bytes) and NULL details_json.
+    # Canonical text: nexus-audit-v1\nGENESIS\n1:9;20:2026-11-07T12:05:00Z;6:system;-;-;13:location.view;9:endereço;7:allowed;-;
+    UNICODE_ROW = (9, "2026-11-07T12:05:00Z", "system", None, None, "location.view", "endereço", "allowed", None)
+    UNICODE_HASH = "4566d77da7ce58fe9f71e062ff6c769791bf94b8ff9278cc010852ccb737ee5e"
+
+    def test_seed_chain_verifies(self):
+        self.assertEqual(verify_audit_chain(self.conn), (True, None, None))
+
+    def test_known_answer_vector(self):
+        self.assertEqual(audit_hash_v1(AUDIT_GENESIS, self.KAT_ROW), self.KAT_HASH)
+
+    def test_tampered_row_is_detected(self):
+        self.conn.execute("DROP TRIGGER audit_log_deny_update")
+        self.conn.execute("UPDATE audit_log SET action = 'stock.adjust' WHERE id = 2")
+        ok, broken_id, reason = verify_audit_chain(self.conn)
+        self.assertFalse(ok)
+        self.assertEqual(broken_id, 2)
+        self.assertIsNotNone(reason)
+
+    def test_broken_link_is_detected(self):
+        self.conn.execute("DROP TRIGGER audit_log_deny_update")
+        self.conn.execute("UPDATE audit_log SET prev_hash = ? WHERE id = 3", ("0" * 64,))
+        ok, broken_id, reason = verify_audit_chain(self.conn)
+        self.assertFalse(ok)
+        self.assertEqual(broken_id, 3)
+        self.assertIn("prev_hash", reason)
+
+    def test_null_details_and_non_ascii_target_use_utf8_byte_length(self):
+        self.assertEqual(audit_hash_v1(AUDIT_GENESIS, self.UNICODE_ROW), self.UNICODE_HASH)
+
+        # The same kind of row appended after the seed must keep the chain valid.
+        last_hash = self.conn.execute("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()[0]
+        row = (5,) + self.UNICODE_ROW[1:]
+        self.conn.execute(
+            "INSERT INTO audit_log (id, occurred_at, actor_type, actor_id, on_behalf_of, action, target, "
+            "outcome, details_json, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row + (last_hash, audit_hash_v1(last_hash, row)))
+        self.assertEqual(verify_audit_chain(self.conn), (True, None, None))
 
 
 class PrivilegeEscalationTests(DatabaseTestCase):

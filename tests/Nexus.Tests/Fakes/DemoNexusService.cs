@@ -7,8 +7,9 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using erp_inteligente.Models;
+using erp_inteligente.Services;
 
-namespace erp_inteligente.Services.Demo;
+namespace Nexus.Tests.Fakes;
 
 /// <summary>
 /// Keyword-based stand-in for the LLM Planner (ROADMAP.md, feature 3), so the Nexus screen can be

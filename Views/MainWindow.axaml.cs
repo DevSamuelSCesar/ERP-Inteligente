@@ -1,20 +1,12 @@
-using System;
 using Avalonia.Controls;
-using erp_inteligente.ViewModels;
 
 namespace erp_inteligente.Views;
 
+/// <summary>Main window; session and sign-out are coordinated by <c>AppController</c>.</summary>
 public partial class MainWindow : Window
 {
     public MainWindow()
     {
         InitializeComponent();
-    }
-
-    protected override void OnDataContextChanged(EventArgs e)
-    {
-        base.OnDataContextChanged(e);
-        if (DataContext is ShellViewModel shell)
-            shell.SignOutRequested += (_, _) => Close();
     }
 }

@@ -504,12 +504,25 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
 | Q2 FEFO | 33,8 ms | 9,4 ms |
 
 - **Base inicial:** scripts em [`db/`](db/): `schema.sql`, `security.sql` (triggers e views), `seed.sql` (dados fictícios), `volume.sql`, `benchmark.sql` e `optimize.sql`.
+- **Implementado no app (feature 1 do roadmap):**
+  - **Banco e chaves:** SQLCipher no arquivo inteiro, com duas chaves aleatórias de 32 bytes guardadas no cofre do sistema (libsecret no Linux, DPAPI no Windows). Uma cópia do `.db` não abre ("file is not a database"), e o app nunca gera uma chave nova para um banco existente.
+  - **Login e sessão:**
+    - senhas em Argon2id (64 MiB, t=3, p=4);
+    - bloqueio de 15 min após 5 falhas;
+    - mensagem única, sem revelar se o usuário existe;
+    - sessão que expira após 15 min sem uso.
+  - **Três conexões:**
+    - a da IA é somente leitura, com *authorizer* que só deixa ler as views `v_ai_*`;
+    - a do Executor e a da Aplicação são de escrita, com `foreign_keys` ligado.
+  - **Policy engine:** confere a permissão no banco a cada consulta (*deny-overrides*) e preenche o `$warehouse_id` da sessão; a IA age com a interseção dos direitos dela com os do usuário.
+  - **Auditoria encadeada:** regra v1 de SHA-256, igual em Python e C#, verificada ao abrir o app e a cada login; uma cadeia quebrada aparece como alerta para quem tem `audit.read`.
+  - Regras e números completos em [`references/ARQUITETURA.md`](references/ARQUITETURA.md), seção 12.
 
 ## Parte de integração
 
 - **Diagrama único** juntando banco, LLM e RAG, com permissões, proteção de dados e auditoria marcadas: seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima, incluindo os ataques.
 - **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada nem vê dados sensíveis.
-- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, já automatizados em `db/tests/test_db.py` (22 testes passando): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
+- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (27 testes) e nos testes do app em `tests/Nexus.Tests` (267 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns e a detecção de adulteração da auditoria): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
 
 ## Como rodar
 
@@ -530,9 +543,16 @@ python3 -m unittest discover -s db/tests -v
 
 # Gerar o PDF deste README, com os diagramas (precisa de Chrome/Chromium; o PDF não vai para o git)
 python3 tools/readme_to_pdf.py               # gera README.pdf
+
+# App desktop (.NET 10)
+dotnet run                                   # banco em ~/.local/share/Nexus/nexus.db (Linux)
+dotnet run -- --db /caminho/nexus.db         # outro arquivo
+dotnet test tests/Nexus.Tests                # testes do app
 ```
 
-Arquivos `.db` são ignorados pelo git. O app C# ainda não foi implementado; os scripts SQL e os testes já funcionam.
+No primeiro uso o app cria o banco criptografado a partir dos scripts de `db/` e guarda as chaves no cofre do sistema. Para entrar, use um dos usuários fictícios (`op.joao`, `sup.maria`, `adm.carlos`, `aud.lucia`) com a **senha de demonstração `nexus-demo-2026`**. Essa senha existe só para os dados fictícios do repositório e nunca deve ser usada com dados reais.
+
+O Nexus ainda só consulta: alterar dados chega com o motor de planos (feature 2 do roadmap). Arquivos `.db` são ignorados pelo git.
 
 ## Documentação
 

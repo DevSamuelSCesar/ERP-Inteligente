@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using erp_inteligente.Models;
+using erp_inteligente.Services;
 
-namespace erp_inteligente.Services.Demo;
+namespace Nexus.Tests.Fakes;
 
 /// <summary>
 /// In-memory stand-in for the deterministic engine (ROADMAP.md, feature 2): validates every step against
@@ -13,6 +14,10 @@ namespace erp_inteligente.Services.Demo;
 public sealed class DemoPlanService(DemoData data) : IPlanService
 {
     public IReadOnlyList<Plan> Plans => data.Plans;
+
+    public bool IsEngineAvailable => true;
+
+    public Task RefreshAsync() => Task.CompletedTask;
 
     public event EventHandler<Plan>? PlanChanged;
 

@@ -94,7 +94,7 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
     private void Refresh()
     {
         var status = _plan.Status;
-        CanDecide = ApprovalPolicy.CanDecide(_plan, _user);
+        CanDecide = _plans.IsEngineAvailable && ApprovalPolicy.CanDecide(_plan, _user);
         IsInProgress = status == PlanStatus.Validating;
         IsAwaitingApprover = status == PlanStatus.PendingApproval && !CanDecide;
         IsExecuted = status == PlanStatus.Executed;
@@ -108,6 +108,8 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
             PlanStatus.Validating => "Validando plano",
             PlanStatus.PendingApproval when CanDecide => $"Pedido por {_plan.RequestedByName}. Aceitar?",
             PlanStatus.PendingApproval when _plan.RequestedBy == _user.Username => "Aguardando supervisor. Quem pediu não pode aprovar.",
+            PlanStatus.PendingApproval when !_plans.IsEngineAvailable =>
+                $"Pedido por {_plan.RequestedByName}. Aprovar e rejeitar ficam disponíveis com o motor de planos.",
             PlanStatus.PendingApproval => "Aguardando supervisor.",
             PlanStatus.Executed when _plan.Risk == PlanRisk.Critical => $"Aprovado por {_plan.DecidedByName} e executado em {at}",
             PlanStatus.Executed => $"Executado automaticamente em {at}",

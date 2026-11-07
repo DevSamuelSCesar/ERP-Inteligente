@@ -56,10 +56,10 @@ public sealed partial class PlansViewModel : PageViewModel
         SelectedBoard = value is null ? null : new PlanBoardViewModel(value.Plan, _user, _plans, _dialogs);
     }
 
-    public override Task OnActivatedAsync()
+    public override async Task OnActivatedAsync()
     {
+        await _plans.RefreshAsync();
         Reload();
-        return Task.CompletedTask;
     }
 
     private void Reload()

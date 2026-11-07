@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using erp_inteligente.Models;
+using erp_inteligente.Services;
 
-namespace erp_inteligente.Services.Demo;
+namespace Nexus.Tests.Fakes;
 
 /// <summary>
 /// In-memory, fictitious warehouse mirroring db/seed.sql. Stands in for the SQLite layer while only the
