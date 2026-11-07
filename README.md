@@ -1,4 +1,4 @@
-# ERP Inteligente: armazém gerenciado por IA
+# Nexus: armazém gerenciado por IA
 
 **Grupo:** ERP INTELIGENTE · **Repositório:** https://github.com/NatanCorreiaS/erp-inteligente
 
@@ -13,7 +13,7 @@ Entrega para as duas disciplinas: **Projeto de Inteligência Artificial** e **Se
 
 ## Problema
 
-Armazéns pequenos e médios controlam estoque com planilhas ou sistemas cheios de telas, que exigem treinamento e geram erros de digitação, estoque divergente e produtos vencidos. O **ERP Inteligente** é um app desktop em que o operador pede em português ("guarde as 40 caixas do ABC-123 que estão na doca") e uma IA consulta os dados, monta um plano, mostra o efeito e o executa **com segurança**. O supervisor só decide o que é crítico.
+Armazéns pequenos e médios controlam estoque com planilhas ou sistemas cheios de telas, que exigem treinamento e geram erros de digitação, estoque divergente e produtos vencidos. O **Nexus** é um app desktop em que o operador pede em português ("guarde as 40 caixas do ABC-123 que estão na doca") e uma IA consulta os dados, monta um plano, mostra o efeito e o executa **com segurança**. O supervisor só decide o que é crítico.
 
 **Ideia central:** o LLM **descreve** as alterações em um plano JSON; um motor de código **valida, simula e executa** o plano numa transação. A IA nunca escreve no banco diretamente.
 
@@ -158,7 +158,7 @@ flowchart LR
     AUD["👤 Auditor"]
     IA["🤖 Agente IA"]
 
-    subgraph SYS["ERP Inteligente · módulo de armazém"]
+    subgraph SYS["Nexus · módulo de armazém"]
         UC1(["Fazer pedido em linguagem natural"])
         UC2(["Consultar estoque, lotes e pedidos"])
         UC3(["Receber mercadoria"])

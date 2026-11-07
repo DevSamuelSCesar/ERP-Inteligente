@@ -1,6 +1,6 @@
 # Roadmap
 
-Ordem de implementação das features do ERP Inteligente, derivada de [`references/ARQUITETURA.md`](references/ARQUITETURA.md). Cada feature só começa quando a anterior está testada. Sistemas interligados entram juntos na mesma feature.
+Ordem de implementação das features do Nexus, derivada de [`references/ARQUITETURA.md`](references/ARQUITETURA.md). Cada feature só começa quando a anterior está testada. Sistemas interligados entram juntos na mesma feature.
 
 > Já pronto: schema, segurança, seed e testes do SQLite em `db/`, e a base de conhecimento em `knowledge/`.
 

@@ -1,4 +1,4 @@
-# Canvas: ERP Inteligente (módulo de armazém)
+# Canvas: Nexus (módulo de armazém)
 
 | | |
 |---|---|

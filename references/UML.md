@@ -14,7 +14,7 @@ flowchart LR
     AUD["👤 Auditor"]
     IA["🤖 Agente IA"]
 
-    subgraph SYS["ERP Inteligente · módulo de armazém"]
+    subgraph SYS["Nexus · módulo de armazém"]
         UC1(["Fazer pedido em linguagem natural"])
         UC2(["Consultar estoque, lotes e pedidos"])
         UC3(["Receber mercadoria"])
