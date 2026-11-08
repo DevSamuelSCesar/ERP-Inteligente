@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.MemoriesView"
+             x:DataType="vm:MemoriesViewModel">
+
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
+        <KeyBinding Gesture="Escape" Command="{Binding CancelEditCommand}" />
+    </UserControl.KeyBindings>
+
+    <!-- Memórias (references/UI.md, section 7.2): table on top, detail or editor below -->
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto">
+            <RadioButton Classes="tab" GroupName="MemoryTabs" Content="Ativas" IsChecked="{Binding ShowActive}" />
+            <RadioButton Grid.Column="1" Classes="tab" GroupName="MemoryTabs" Content="Arquivadas" IsChecked="{Binding ShowArchived}" />
+            <TextBox Grid.Column="2" Width="320" HorizontalAlignment="Left" Margin="16,0,0,0"
+                     Text="{Binding FilterText}" PlaceholderText="Filtrar por texto ou escopo" MaxLength="100" />
+            <Button Grid.Column="3" Classes="neutral" Command="{Binding NewMemoryCommand}" IsVisible="{Binding CanManage}"
+                    ToolTip.Tip="Escrever uma memória do armazém (Alt+N)">
+                <AccessText Text="_Nova memória" />
+            </Button>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="{Binding IsReadOnly}">
+            <PathIcon Classes="info" Data="{StaticResource Icon.Info}" Width="14" Height="14" />
+            <TextBlock Classes="secondary" VerticalAlignment="Center"
+                       Text="Somente leitura: corrigir e arquivar memórias é do supervisor." />
+        </StackPanel>
+
+        <!-- Feedback: a line with icon and text, never a toast -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="{Binding HasFeedback}">
+            <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14" IsVisible="{Binding FeedbackIsSuccess}" />
+            <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14" IsVisible="{Binding FeedbackIsError}" />
+            <TextBlock Text="{Binding Feedback}" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Panel Grid.Row="3" Margin="0,12,0,0">
+            <DataGrid ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" IsEnabled="{Binding IsViewing}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Tipo" Binding="{Binding KindText}" Width="110" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Escopo" Binding="{Binding ScopeText}" Width="170" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Conteúdo" Binding="{Binding Content}" Width="*" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Confiança" Binding="{Binding ConfidenceText}" Width="100" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Usos" Binding="{Binding UseCount}" Width="70" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Origem" Binding="{Binding OriginText}" Width="100" />
+                    <DataGridTextColumn x:DataType="vm:MemoryRow" Header="Criada em" Binding="{Binding CreatedText}" Width="140" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Classes="secondary" Margin="0,40,0,0" HorizontalAlignment="Center" IsVisible="{Binding IsEmpty}"
+                       Text="Nenhuma memória nesta lista." />
+        </Panel>
+
+        <!-- Detail of the selected memory -->
+        <StackPanel Grid.Row="4" Margin="0,14,0,0" IsVisible="{Binding IsViewing}">
+            <StackPanel IsVisible="{Binding HasSelection}">
+                <Rectangle Classes="rule" />
+                <TextBlock Classes="secondary" Margin="0,10,0,6" Text="{Binding SelectedMeta}" TextWrapping="Wrap" />
+                <SelectableTextBlock Text="{Binding SelectedRow.Content, FallbackValue=''}" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0" IsVisible="{Binding CanManage}">
+                    <Button Classes="neutral" Command="{Binding CorrectCommand}" IsVisible="{Binding CanCorrectSelected}"
+                            ToolTip.Tip="Corrigir o texto (Alt+C)">
+                        <AccessText Text="_Corrigir" />
+                    </Button>
+                    <Button Classes="neutral" Command="{Binding ArchiveCommand}" IsVisible="{Binding CanArchiveSelected}"
+                            ToolTip.Tip="O Nexus deixa de usar esta memória (Alt+A)">
+                        <AccessText Text="_Arquivar" />
+                    </Button>
+                    <Button Classes="neutral" Command="{Binding ReactivateCommand}" IsVisible="{Binding CanReactivateSelected}"
+                            ToolTip.Tip="Voltar a usar esta memória (Alt+R)">
+                        <AccessText Text="_Reativar" />
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Editor (memory.manage only) -->
+        <StackPanel Grid.Row="4" Margin="0,14,0,0" IsVisible="{Binding IsEditing}">
+            <Rectangle Classes="rule" />
+            <TextBlock Classes="boardTitle" Text="{Binding EditorTitle}" Margin="0,10,0,10" />
+
+            <Grid ColumnDefinitions="140,Auto,16,Auto,Auto" Margin="0,0,0,10" IsVisible="{Binding IsNew}">
+                <TextBlock Classes="label" Text="Tipo e escopo" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" MinWidth="160" ItemsSource="{Binding Kinds}" SelectedItem="{Binding EditKind}" />
+                <ComboBox Grid.Column="3" MinWidth="160" ItemsSource="{Binding Scopes}" SelectedItem="{Binding EditScope}" />
+                <TextBox Grid.Column="4" Width="220" Margin="8,0,0,0" Text="{Binding EditScopeRef}" MaxLength="60" IsEnabled="{Binding IsScopeRefEnabled}"
+                         PlaceholderText="SKU, endereço, zona ou skill" />
+            </Grid>
+            <TextBlock Classes="error" Text="{Binding ScopeError}" TextWrapping="Wrap" Margin="140,0,0,8"
+                       IsVisible="{Binding ScopeError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+            <Grid ColumnDefinitions="140,*">
+                <TextBlock Classes="label" Text="Texto" VerticalAlignment="Top" Margin="0,6,0,0" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBox Text="{Binding EditContent}" AcceptsReturn="False" TextWrapping="Wrap" MinHeight="64" MaxLength="1000"
+                             PlaceholderText="Uma regra ou fato do armazém, curto e objetivo. Sem dados pessoais." />
+                    <TextBlock Classes="error" Text="{Binding ContentError}" TextWrapping="Wrap"
+                               IsVisible="{Binding ContentError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="140,12,0,0">
+                <Button Classes="primary" Command="{Binding SaveCommand}" ToolTip.Tip="Salvar (Ctrl+S)">
+                    <TextBlock Text="Salvar" />
+                </Button>
+                <Button Classes="neutral" Command="{Binding CancelEditCommand}" ToolTip.Tip="Sair sem salvar (Esc)">
+                    <TextBlock Text="Cancelar" />
+                </Button>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</UserControl>

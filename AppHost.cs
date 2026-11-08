@@ -1,10 +1,13 @@
 using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using erp_inteligente.Core.Audit;
 using erp_inteligente.Core.Auth;
 using erp_inteligente.Core.Data;
 using erp_inteligente.Core.Engine;
+using erp_inteligente.Core.Knowledge;
 using erp_inteligente.Core.Llm;
+using erp_inteligente.Core.Memory;
 using erp_inteligente.Core.Planner;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Core.Security;
@@ -33,13 +36,18 @@ public sealed class AppHost : IDisposable
         ApplicationDb = new ApplicationDb(database, Policy);
         Auth = new AuthService(database, new PasswordHasher(passwordParameters), Policy, AuditLog, time, authOptions);
         Session = new SessionService(Auth, time, authOptions);
-        Engine = new PlanEngine(database, Policy, AuditLog, time);
+        MemoryStore = new MemoryStore(database, Policy, AuditLog, time);
+        Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore);
         LlmSettings = new LlmSettings(secrets, database.Path);
         var deepSeek = llm is null ? new DeepSeekProvider(DeepSeekProvider.CreateDefaultHandler(), LlmSettings.ReadKey) : null;
         Llm = llm ?? deepSeek!;
         LlmSettingsService = new LlmSettingsService(LlmSettings, Policy, AuditLog,
             ct => deepSeek?.TestConnectionAsync(ct) ?? Task.CompletedTask);
-        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: new SkillCatalog(database));
+        SyncKnowledge(database);
+        MemoryRetriever = new MemoryRetriever(database, Policy);
+        KnowledgeRetriever = new KnowledgeRetriever(database);
+        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: new SkillCatalog(database),
+            memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever);
         SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
     }
@@ -57,6 +65,9 @@ public sealed class AppHost : IDisposable
     public LlmSettingsService LlmSettingsService { get; }
     public Planner Planner { get; }
     public SkillStore SkillStore { get; }
+    public MemoryStore MemoryStore { get; }
+    public MemoryRetriever MemoryRetriever { get; }
+    public KnowledgeRetriever KnowledgeRetriever { get; }
 
     /// <summary>Last verification of the audit hash chain (at startup and at every login).</summary>
     public AuditVerification AuditStatus { get; private set; }
@@ -65,6 +76,19 @@ public sealed class AppHost : IDisposable
     public static AppHost Open(string databasePath, ISecretStore store) =>
         new(DatabaseBootstrapper.OpenOrCreate(databasePath, new KeyManager(store)),
             TimeProvider.System, Argon2Parameters.Default, AuthOptions.Default, store);
+
+    /// <summary>Indexes the embedded procedures (idempotent). A failure only leaves the search empty: the app still starts.</summary>
+    private static void SyncKnowledge(NexusDatabase database)
+    {
+        try
+        {
+            KnowledgeIndexer.Sync(database);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceWarning("Knowledge index sync failed: " + ex.GetType().Name);
+        }
+    }
 
     /// <summary>Re-checks the whole audit chain and keeps the result for the next shell.</summary>
     public AuditVerification VerifyAudit()
@@ -84,7 +108,8 @@ public sealed class AppHost : IDisposable
             AuditStatus,
             $"{Database.Path} (criptografado com SQLCipher)",
             LlmSettingsService,
-            new SqliteSkillService(SkillStore, Session));
+            new SqliteSkillService(SkillStore, Session),
+            new SqliteMemoryService(MemoryStore, Session));
 
     public void Dispose() => Database.Dispose();
 }

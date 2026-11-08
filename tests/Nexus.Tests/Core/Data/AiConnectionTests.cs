@@ -105,6 +105,31 @@ public class AiConnectionTests : IDisposable
     [InlineData("SELECT count(*) FROM skill_versions")]
     public void SkillTables_AreDenied(string sql) => AssertDenied(sql);
 
+    // Retrieval of memories and knowledge runs on the application connection; the AI reads neither table nor its FTS index.
+    [Theory]
+    [InlineData("SELECT content FROM memories")]
+    [InlineData("SELECT count(*) FROM memories")]
+    [InlineData("SELECT count(*) FROM knowledge_chunks")]
+    public void MemoryAndKnowledgeTables_AreDenied(string sql) => AssertDenied(sql);
+
+    // The FTS5 index is refused while its virtual table is connected (its shadow tables are denied), so the error
+    // is "vtable constructor failed" instead of SQLITE_AUTH.
+    [Theory]
+    [InlineData("SELECT content FROM memories_fts WHERE memories_fts MATCH 'refrigerados'")]
+    [InlineData("SELECT count(*) FROM memories_fts")]
+    [InlineData("SELECT content FROM knowledge_fts WHERE knowledge_fts MATCH 'palete'")]
+    public void FullTextIndexes_AreDenied(string sql)
+    {
+        using var cmd = _ai.CreateCommand();
+        cmd.CommandText = sql;
+        var ex = Assert.Throws<SqliteException>(() =>
+        {
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) { }
+        });
+        Assert.Contains("vtable constructor failed", ex.Message);
+    }
+
     [Theory]
     [InlineData("INSERT INTO memories (scope, scope_ref, content) VALUES ('x','y','z')")]
     [InlineData("UPDATE stock_balances SET quantity = 0")]

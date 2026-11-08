@@ -268,18 +268,26 @@ CREATE TABLE skill_versions (
 -- AI memory and knowledge base (RAG)
 -- ---------------------------------------------------------------------------
 
+-- Learned knowledge of the AI, per warehouse. Archived, never deleted; identity and origin are fixed (guards in security.sql).
 CREATE TABLE memories (
     id             INTEGER PRIMARY KEY,
+    warehouse_id   INTEGER NOT NULL REFERENCES warehouses (id),
     kind           TEXT NOT NULL CHECK (kind IN ('correction', 'preference', 'pattern', 'fact')),
-    scope          TEXT NOT NULL,
-    scope_ref      TEXT,
-    content        TEXT NOT NULL CHECK (length(content) <= 1000),
+    scope          TEXT NOT NULL CHECK (scope IN ('global', 'skill', 'sku', 'location', 'zone', 'supplier', 'customer')),
+    scope_ref      TEXT CHECK (scope_ref IS NULL OR length(scope_ref) BETWEEN 1 AND 60),
+    content        TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1000),
     confidence     REAL NOT NULL DEFAULT 0.5 CHECK (confidence BETWEEN 0 AND 1),
-    use_count      INTEGER NOT NULL DEFAULT 0,
+    use_count      INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0),
+    status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    origin         TEXT NOT NULL CHECK (origin IN ('ai', 'system', 'user')),
+    created_by     INTEGER REFERENCES users (id),
     source_plan_id INTEGER REFERENCES plans (id),
     created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at     TEXT,
     last_used_at   TEXT
 ) STRICT;
+
+CREATE INDEX memories_by_warehouse ON memories (warehouse_id, status);
 
 CREATE VIRTUAL TABLE memories_fts USING fts5 (
     content,

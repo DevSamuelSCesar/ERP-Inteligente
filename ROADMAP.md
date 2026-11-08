@@ -43,6 +43,10 @@ Skills no formato dos agentes de IA (`SKILL.md` com frontmatter `nome`, `descric
 ### 5. Memória e RAG
 Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.
 *Por que junto:* os dois são recuperação de texto livre no mesmo contexto do Planner e compartilham índices e delimitação anti-injection.
+*Estado:* concluída em 2026-11-08, com BM25 apenas.
+- Memórias por armazém, com status, origem e autor (migração 006). A IA grava pelo filtro (`remember`), e a rejeição de um plano da IA vira uma correção. Só o supervisor (`memory.manage`) cria, corrige e arquiva, na tela Memórias.
+- `knowledge/` é indexado na abertura. Memórias e trechos relevantes entram no pedido como dados delimitados, e há as ferramentas `search_knowledge` e `search_memories`.
+- **Pendente:** embeddings, `sqlite-vec` e a busca híbrida com RRF (decisão de usar só BM25 por enquanto); o job de manutenção de memórias continua na feature 9.
 
 ## Segurança e economia
 

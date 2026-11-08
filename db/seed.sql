@@ -26,14 +26,14 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (1, 'memory.write', 'ALLOW'), (1, 'order.manage', 'ALLOW'),
     (1, 'stock.adjust', 'DENY'), (1, 'stock.ship', 'DENY'), (1, 'plan.approve', 'DENY'),
     (1, 'sensitive.read', 'DENY'), (1, 'user.manage', 'DENY'), (1, 'role.manage', 'DENY'),
-    (1, 'audit.read', 'DENY'), (1, 'skill.manage', 'DENY'),
+    (1, 'audit.read', 'DENY'), (1, 'skill.manage', 'DENY'), (1, 'memory.manage', 'DENY'),
     -- supervisor
     (2, 'stock.read', 'ALLOW'), (2, 'stock.receive', 'ALLOW'), (2, 'stock.move', 'ALLOW'),
     (2, 'stock.reserve', 'ALLOW'), (2, 'stock.pick', 'ALLOW'), (2, 'stock.ship', 'ALLOW'),
     (2, 'stock.adjust', 'ALLOW'), (2, 'plan.submit', 'ALLOW'), (2, 'plan.approve', 'ALLOW'),
     (2, 'catalog.manage', 'ALLOW'), (2, 'location.manage', 'ALLOW'), (2, 'sensitive.read', 'ALLOW'),
     (2, 'memory.write', 'ALLOW'), (2, 'recipe.manage', 'ALLOW'), (2, 'audit.read', 'ALLOW'),
-    (2, 'order.manage', 'ALLOW'), (2, 'skill.manage', 'ALLOW'),
+    (2, 'order.manage', 'ALLOW'), (2, 'skill.manage', 'ALLOW'), (2, 'memory.manage', 'ALLOW'),
     (2, 'user.manage', 'DENY'), (2, 'role.manage', 'DENY'),
     -- administrador
     (3, 'stock.read', 'ALLOW'), (3, 'user.manage', 'ALLOW'), (3, 'role.manage', 'ALLOW'),
@@ -41,12 +41,13 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (3, 'audit.read', 'ALLOW'),
     (3, 'plan.approve', 'DENY'), (3, 'stock.adjust', 'DENY'), (3, 'stock.ship', 'DENY'),
     (3, 'stock.receive', 'DENY'), (3, 'stock.move', 'DENY'), (3, 'skill.manage', 'DENY'),
+    (3, 'memory.manage', 'DENY'),
     -- auditor
     (4, 'stock.read', 'ALLOW'), (4, 'audit.read', 'ALLOW'),
     (4, 'plan.submit', 'DENY'), (4, 'plan.approve', 'DENY'), (4, 'stock.receive', 'DENY'),
     (4, 'stock.move', 'DENY'), (4, 'stock.adjust', 'DENY'), (4, 'stock.ship', 'DENY'),
     (4, 'sensitive.read', 'DENY'), (4, 'user.manage', 'DENY'), (4, 'role.manage', 'DENY'),
-    (4, 'memory.write', 'DENY'), (4, 'skill.manage', 'DENY'),
+    (4, 'memory.write', 'DENY'), (4, 'skill.manage', 'DENY'), (4, 'memory.manage', 'DENY'),
     -- agente_ia (effective rights = AI role ∩ requesting user's role; decision of 2026-11-08 in migrations/003)
     (5, 'stock.read', 'ALLOW'), (5, 'plan.submit', 'ALLOW'), (5, 'stock.receive', 'ALLOW'),
     (5, 'stock.move', 'ALLOW'), (5, 'stock.reserve', 'ALLOW'), (5, 'stock.pick', 'ALLOW'),
@@ -54,7 +55,8 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (5, 'order.manage', 'ALLOW'), (5, 'catalog.manage', 'ALLOW'), (5, 'memory.write', 'ALLOW'),
     (5, 'plan.approve', 'DENY'),
     (5, 'sensitive.read', 'DENY'), (5, 'user.manage', 'DENY'), (5, 'role.manage', 'DENY'),
-    (5, 'audit.read', 'DENY'), (5, 'recipe.manage', 'DENY'), (5, 'skill.manage', 'DENY');
+    (5, 'audit.read', 'DENY'), (5, 'recipe.manage', 'DENY'), (5, 'skill.manage', 'DENY'),
+    (5, 'memory.manage', 'DENY');
 
 -- ---------------------------------------------------------------------------
 -- Warehouse, users, structure
@@ -212,11 +214,11 @@ INSERT INTO plans (id, requested_by, planned_by, recipe_id, skill, intent, plan_
         '1.0', 'critical', 'pending_approval',
         '{"ALI-300":{"C-01-01":-1}}', 1, '2026-10-26T08:05:00Z', NULL);
 
-INSERT INTO memories (kind, scope, scope_ref, content, confidence, use_count) VALUES
-    ('preference', 'skill', 'armazenagem', 'Produtos refrigerados (ALI-*) vão sempre para a zona C, nunca para a doca por mais de 30 minutos.', 0.9, 12),
-    ('correction', 'location', 'A-02-03', 'Endereço A-02-03 tem viga baixa: não aceita palete acima de 1,5 m.', 0.8, 3),
-    ('pattern', 'supplier', '3', 'Laticínios Fictícios Gama costuma entregar entre 7h e 8h; priorizar doca DOCA-02.', 0.6, 2),
-    ('fact', 'global', NULL, 'Ajustes de estoque exigem motivo e aprovação de supervisor.', 1.0, 20);
+INSERT INTO memories (warehouse_id, kind, scope, scope_ref, content, confidence, use_count, status, origin, created_by) VALUES
+    (1, 'preference', 'skill', 'armazenagem', 'Produtos refrigerados (ALI-*) vão sempre para a zona C, nunca para a doca por mais de 30 minutos.', 0.9, 12, 'active', 'user', 2),
+    (1, 'correction', 'location', 'A-02-03', 'Endereço A-02-03 tem viga baixa: não aceita palete acima de 1,5 m.', 0.8, 3, 'active', 'user', 2),
+    (1, 'pattern', 'supplier', '3', 'Laticínios Fictícios Gama costuma entregar entre 7h e 8h; priorizar doca DOCA-02.', 0.6, 2, 'active', 'user', 2),
+    (1, 'fact', 'global', NULL, 'Ajustes de estoque exigem motivo e aprovação de supervisor.', 1.0, 20, 'active', 'user', 2);
 
 INSERT INTO audit_log (id, occurred_at, actor_type, actor_id, on_behalf_of, action, target, outcome, details_json, prev_hash, hash) VALUES
     (1, '2026-10-20T10:01:00Z', 'ai',   5, 1, 'plan.submit',  'plan:1', 'allowed', '{"risk":"reversible"}', 'GENESIS', 'e623a8c643ea4c39a3525198ecb9b787f9837183d3359f58978fe47e98bf8fb9'),

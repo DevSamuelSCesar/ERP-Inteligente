@@ -47,7 +47,7 @@ A janela tem duas regiões fixas:
 - A ordem é fixa:
   1. **Nexus**, primeiro e selecionado ao abrir o app.
   2. As telas de consulta: Estoque, Endereços, Pedidos.
-  3. Planos (histórico e aprovações pendentes), Skills, Receitas, Auditoria.
+  3. Planos (histórico e aprovações pendentes), Skills, Memórias, Receitas, Auditoria.
   4. No rodapé, separados: o usuário logado, as configurações e o botão de sair.
 - Planos mostra um contador de aprovações pendentes quando o usuário pode aprovar.
 - A coluna não muda ao navegar. Só o container de conteúdo troca.
@@ -124,6 +124,10 @@ Quando há escolhas ou próximos passos úteis, o Nexus oferece de 1 a 4 **opç�
 - São botões neutros com seta, nunca vermelhos.
 - Clicar numa opção envia o pedido dela como se o operador o tivesse digitado. Depois disso, a linha de opções fica só para leitura.
 - Os textos vêm do modelo, então são tratados como dados: são cortados no tamanho máximo e caracteres de controle são removidos.
+
+### 4.4 Memória registrada
+
+Quando a IA grava uma memória, aparece abaixo da resposta uma linha discreta, em `TextSecondary`, com o ícone de memória: "Memória registrada: texto" (ou "Memória reforçada: …" quando já existia igual). É só informativa; corrigir ou arquivar é na tela Memórias.
 
 ### 4.1 Estados de uma tarefa
 
@@ -273,6 +277,13 @@ Skills
 - **Editor:** nome (só na criação), "Quando usar", as 20 operações do catálogo como caixas de seleção, e as instruções em Markdown. A validação roda a cada mudança, com a mensagem embaixo do campo; Salvar (Ctrl+S) só habilita sem erros e grava uma nova versão; Cancelar (Esc) sai sem gravar.
 - O resultado de cada ação aparece numa linha com ícone e texto, nunca em toast.
 
+### 7.2 Memórias
+
+- **Tabela** em toda a largura: Tipo, Escopo, Conteúdo, Confiança (tabular), Usos, Origem ("IA", "Sistema" ou "Supervisor") e Criada em, ordenada pela confiança. Abas Ativas e Arquivadas e filtro por texto ou escopo.
+- **Detalhe** abaixo da tabela: os metadados numa linha e o texto completo, selecionável.
+- **Ações (só `memory.manage`):** "Nova memória" (tipo, escopo e referência, como SKU, endereço, zona ou skill, mais o texto), "Corrigir" (só o texto), "Arquivar" e "Reativar". O filtro de proteção roda enquanto se digita, com a mensagem embaixo do campo, e Salvar só habilita sem erro.
+- Sem a permissão, a linha "Somente leitura: corrigir e arquivar memórias é do supervisor."
+
 ## 8. Visibilidade
 
 O que cada usuário vê depende das permissões efetivas (`v_effective_permissions`) e do armazém dele.
@@ -280,6 +291,7 @@ O que cada usuário vê depende das permissões efetivas (`v_effective_permissio
 | Elemento | Regra |
 |----------|-------|
 | Itens da coluna de menus | Só aparecem os itens cuja permissão o usuário tem (ex.: Auditoria exige `audit.read`; Receitas exige `recipe.manage` para editar) |
+| Tela Memórias | Todos com `stock.read` leem as memórias do próprio armazém; criar, corrigir, arquivar e reativar exigem `memory.manage` (supervisor) |
 | Tela Skills | Todos com `stock.read` leem; criar, editar, personalizar, arquivar e reativar exigem `skill.manage` (supervisor) |
 | Botões ✓ / ✗ do plano | Ativos só com `plan.approve` e quando o usuário não é o solicitante |
 | Contador de pendências em Planos | Só para quem pode aprovar |

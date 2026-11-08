@@ -59,6 +59,18 @@ CREATE TRIGGER skill_versions_deny_delete BEFORE DELETE ON skill_versions BEGIN
     SELECT RAISE(ABORT, 'DENY: skill_versions is append-only');
 END;
 
+-- Memories are archived, never deleted. Identity, warehouse, origin and creation are fixed; content, scope,
+-- confidence, use counters and status may change (migrations/006_memory.sql).
+CREATE TRIGGER memories_deny_delete BEFORE DELETE ON memories BEGIN
+    SELECT RAISE(ABORT, 'DENY: memories are archived, never deleted');
+END;
+
+CREATE TRIGGER memories_guard_update BEFORE UPDATE ON memories
+WHEN new.id <> old.id OR new.warehouse_id <> old.warehouse_id OR new.origin <> old.origin
+  OR new.created_by IS NOT old.created_by OR new.created_at <> old.created_at BEGIN
+    SELECT RAISE(ABORT, 'DENY: illegal memory change');
+END;
+
 CREATE TRIGGER plans_deny_update_final BEFORE UPDATE ON plans
 WHEN old.status IN ('executed', 'failed', 'rejected') BEGIN
     SELECT RAISE(ABORT, 'DENY: finished plans are immutable');
@@ -75,11 +87,12 @@ END;
 -- Permissions the AI role can never receive, whoever runs the INSERT. stock.adjust and stock.ship are not
 -- here: since 2026-11-08 the AI has the operational rights of the user (migrations/003_full_catalog.sql).
 -- skill.manage is here: the AI never saves its own instructions (migrations/005_skills.sql).
+-- memory.manage is here too: the AI never edits or archives what it has learned (migrations/006_memory.sql).
 CREATE TRIGGER role_permissions_deny_ai_escalation BEFORE INSERT ON role_permissions
 WHEN new.effect = 'ALLOW'
  AND (SELECT is_ai FROM roles WHERE id = new.role_id) = 1
  AND new.permission IN ('plan.approve', 'user.manage', 'role.manage', 'sensitive.read',
-                        'audit.read', 'skill.manage') BEGIN
+                        'audit.read', 'skill.manage', 'memory.manage') BEGIN
     SELECT RAISE(ABORT, 'DENY: permission cannot be granted to the AI role');
 END;
 

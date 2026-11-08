@@ -1,0 +1,12 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.MemoryNoteView"
+             x:DataType="vm:MemoryNoteViewModel">
+    <!-- Informative line: icon + text, secondary color, never a toast -->
+    <Grid ColumnDefinitions="Auto,*">
+        <PathIcon Classes="info" Data="{StaticResource Icon.Memory}" Width="14" Height="14" Margin="0,2,8,0" VerticalAlignment="Top" />
+        <SelectableTextBlock Grid.Column="1" Classes="secondary" Text="{Binding Text}" TextWrapping="Wrap"
+                             Foreground="{DynamicResource TextSecondaryBrush}" />
+    </Grid>
+</UserControl>

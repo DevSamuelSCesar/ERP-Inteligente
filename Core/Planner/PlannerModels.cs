@@ -12,6 +12,9 @@ public abstract record PlannerResult;
 /// <summary>A suggested next step the operator can click; choosing it sends <see cref="Request"/> as if typed.</summary>
 public sealed record PlannerOption(string Label, string Request);
 
+/// <summary>A memory the Nexus saved (or reinforced) during the request, shown to the operator.</summary>
+public sealed record RememberedMemory(long Id, string Content, bool Reinforced);
+
 /// <summary>A plain-text answer to a question, with optional suggested next steps.</summary>
 public sealed record PlannerAnswer(string Text) : PlannerResult
 {
@@ -19,6 +22,9 @@ public sealed record PlannerAnswer(string Text) : PlannerResult
 
     /// <summary>A skill drafted by the model for the supervisor to review; nothing is saved before they confirm.</summary>
     public SkillProposal? Skill { get; init; }
+
+    /// <summary>Memories saved by the model during this request.</summary>
+    public IReadOnlyList<RememberedMemory> Remembered { get; init; } = [];
 
     public PlannerAnswer(string text, IReadOnlyList<PlannerOption> options, SkillProposal? skill = null) : this(text)
     {
@@ -37,7 +43,11 @@ public sealed record ProposalItem(string Title, string Rationale, IReadOnlyList<
 /// One to <see cref="PlannerOptions.MaxProposals"/> alternative plans that passed the dry run. <see cref="Text"/> is the model's
 /// short closing message and <see cref="Options"/> the suggested next steps.
 /// </summary>
-public sealed record PlannerProposals(IReadOnlyList<ProposalItem> Items, string? Text, IReadOnlyList<PlannerOption> Options, SkillProposal? Skill = null) : PlannerResult;
+public sealed record PlannerProposals(IReadOnlyList<ProposalItem> Items, string? Text, IReadOnlyList<PlannerOption> Options, SkillProposal? Skill = null) : PlannerResult
+{
+    /// <summary>Memories saved by the model during this request.</summary>
+    public IReadOnlyList<RememberedMemory> Remembered { get; init; } = [];
+}
 
 /// <summary>A limit was reached (attempts, rounds or tokens). <see cref="Reason"/> is a Portuguese business message.</summary>
 public sealed record PlannerEscalated(string Reason) : PlannerResult;

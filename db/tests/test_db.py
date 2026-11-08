@@ -27,13 +27,15 @@ AI_ROLE_ID = 5
 MIGRATION_003 = DB_DIR / "migrations" / "003_full_catalog.sql"
 MIGRATION_004 = DB_DIR / "migrations" / "004_reservations.sql"
 MIGRATION_005 = DB_DIR / "migrations" / "005_skills.sql"
+MIGRATION_006 = DB_DIR / "migrations" / "006_memory.sql"
 V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
 V4_SCRIPTS = ("schema_v4.sql", "security_v4.sql", "seed_v4.sql")
+V5_SCRIPTS = ("schema_v5.sql", "security_v5.sql", "seed_v5.sql")
 # Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
 V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
 V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
 AI_DENY_PERMISSIONS = {"plan.approve", "sensitive.read", "user.manage", "role.manage", "audit.read", "recipe.manage",
-                       "skill.manage"}
+                       "skill.manage", "memory.manage"}
 
 # Base tables behind the v_ai_* views. SQLite reports a READ with an empty column name when a joined
 # table contributes no column (e.g. LEFT JOIN elimination); that exposes no data and is allowed only here.
@@ -222,7 +224,7 @@ class AuditChainTests(DatabaseTestCase):
 
 class PrivilegeEscalationTests(DatabaseTestCase):
     def test_ai_role_cannot_receive_forbidden_permissions(self):
-        for permission in ("plan.approve", "user.manage", "sensitive.read", "role.manage", "audit.read"):
+        for permission in ("plan.approve", "user.manage", "sensitive.read", "role.manage", "audit.read", "memory.manage"):
             self.assertDenied(
                 "INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, ?, 'ALLOW')",
                 (AI_ROLE_ID, permission))
@@ -374,6 +376,16 @@ class AiConnectionTests(DatabaseTestCase):
         with self.assertRaises(sqlite3.DatabaseError):
             self.ai.execute("UPDATE stock_balances SET quantity = 0")
 
+    def test_ai_cannot_read_memories_or_knowledge(self):
+        # Retrieval runs on the application connection; the AI reads neither the memory nor the RAG tables.
+        for sql in ("SELECT content FROM memories",
+                    "SELECT count(*) FROM memories",
+                    "SELECT content FROM memories_fts WHERE memories_fts MATCH 'refrigerados'",
+                    "SELECT count(*) FROM knowledge_chunks",
+                    "SELECT content FROM knowledge_fts WHERE knowledge_fts MATCH 'palete'"):
+            with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                self.ai.execute(sql).fetchall()
+
     def test_ai_views_expose_no_sensitive_columns(self):
         views = [r[0] for r in self.conn.execute(
             "SELECT name FROM sqlite_schema WHERE type = 'view' AND name LIKE 'v_ai_%'")]
@@ -444,6 +456,7 @@ class MigrationTo3Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_003.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -602,6 +615,7 @@ class MigrationTo4Tests(unittest.TestCase):
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -648,6 +662,7 @@ class MigrationTo5Tests(unittest.TestCase):
         for name in V4_SCRIPTS:
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -794,6 +809,158 @@ class SkillTests(DatabaseTestCase):
                     "SELECT body FROM skill_versions"):
             with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
                 ai.execute(sql).fetchall()
+
+
+class MigrationTo6Tests(unittest.TestCase):
+    """A version 5 database upgraded by migrations/006 must match a fresh install, memory objects included."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        self.migrated.execute("PRAGMA foreign_keys = ON")
+        for name in V5_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+
+    def test_memories_columns_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('memories') ORDER BY cid")
+
+    def test_memory_triggers_index_and_permissions_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, sql FROM sqlite_schema WHERE name IN ('memories_fts', 'memories_fts_insert', "
+            "'memories_fts_delete', 'memories_fts_update', 'memories_deny_delete', 'memories_guard_update', "
+            "'memories_by_warehouse', 'role_permissions_deny_ai_escalation') ORDER BY name")
+        self.assertSameRows("SELECT role_id, permission, effect FROM role_permissions ORDER BY 1, 2, 3")
+        self.assertSameRows("SELECT role_id, permission FROM v_effective_permissions ORDER BY 1, 2")
+
+    def test_existing_memories_keep_their_ids_and_content_and_get_the_new_columns(self):
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM memories").fetchone(), (4,))
+        self.assertEqual(self.migrated.execute("SELECT id, warehouse_id, status, origin, created_by, updated_at "
+                                               "FROM memories ORDER BY id").fetchall(),
+                         [(1, 1, "active", "user", 2, None), (2, 1, "active", "user", 2, None),
+                          (3, 1, "active", "user", 2, None), (4, 1, "active", "user", 2, None)])
+        self.assertSameRows("SELECT id, kind, scope, scope_ref, content, confidence, use_count, source_plan_id, "
+                            "last_used_at FROM memories ORDER BY id")
+
+    def test_full_text_search_finds_the_rebuilt_rows(self):
+        rows = self.migrated.execute(
+            "SELECT m.scope_ref FROM memories_fts f JOIN memories m ON m.id = f.rowid "
+            "WHERE memories_fts MATCH ? ORDER BY bm25(memories_fts)", ("refrigerados",)).fetchall()
+        self.assertEqual(rows, [("armazenagem",)])
+
+    def test_checks_and_guards_hold_after_the_rebuild(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.migrated.execute("INSERT INTO memories (warehouse_id, kind, scope, content, origin) "
+                                  "VALUES (1, 'fact', 'mundo', 'x', 'ai')")
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+            self.migrated.execute("DELETE FROM memories WHERE id = 1")
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+            self.migrated.execute("UPDATE memories SET origin = 'system' WHERE id = 1")
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM role_permissions WHERE role_id = 5 "
+                                               "AND permission = 'memory.manage' AND effect = 'DENY'").fetchone(), (1,))
+
+
+class MemoryTests(DatabaseTestCase):
+    """memories: archived not deleted, fixed identity, CHECKs, full-text index in step with content, supervisor-only manage."""
+
+    CONTENT = "Produtos refrigerados (ALI-*) vão para a zona C, nunca para a doca por mais de 30 minutos."
+
+    def add_memory(self, content=CONTENT, scope="sku", scope_ref="ALI-300", kind="fact", confidence=0.5, origin="ai"):
+        # warehouse 1 (CD-01); created_by 2 (sup.maria).
+        return self.conn.execute(
+            "INSERT INTO memories (warehouse_id, kind, scope, scope_ref, content, confidence, origin, created_by) "
+            "VALUES (1, ?, ?, ?, ?, ?, ?, 2)", (kind, scope, scope_ref, content, confidence, origin)).lastrowid
+
+    def test_scope_kind_and_origin_are_restricted(self):
+        for kwargs in ({"scope": "mundo"}, {"kind": "opiniao"}, {"origin": "desconhecida"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(sqlite3.IntegrityError):
+                self.add_memory(**kwargs)
+        self.add_memory(scope="customer", scope_ref="1")
+
+    def test_content_is_limited_to_1000_characters(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add_memory(content="x" * 1001)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add_memory(content="")
+        self.add_memory(content="x" * 1000)
+
+    def test_confidence_is_between_0_and_1(self):
+        for value in (1.5, -0.1):
+            with self.subTest(confidence=value), self.assertRaises(sqlite3.IntegrityError):
+                self.add_memory(confidence=value)
+
+    def test_scope_ref_is_null_or_1_to_60_characters(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add_memory(scope_ref="x" * 61)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add_memory(scope_ref="")
+        self.add_memory(scope="global", scope_ref=None)
+
+    def test_use_count_is_not_negative(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO memories (warehouse_id, kind, scope, content, use_count, origin) "
+                              "VALUES (1, 'fact', 'global', 'Regra.', -1, 'ai')")
+
+    def test_memories_are_archived_never_deleted(self):
+        mid = self.add_memory()
+        self.assertDenied("DELETE FROM memories WHERE id = ?", (mid,))
+        self.assertDenied("DELETE FROM memories")
+
+    def test_identity_warehouse_origin_and_creation_are_fixed(self):
+        mid = self.add_memory()
+        for sql in ("UPDATE memories SET id = 99 WHERE id = ?",
+                    "UPDATE memories SET warehouse_id = 2 WHERE id = ?",
+                    "UPDATE memories SET origin = 'user' WHERE id = ?",
+                    "UPDATE memories SET created_by = 1 WHERE id = ?",
+                    "UPDATE memories SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?"):
+            with self.subTest(sql=sql):
+                self.assertDenied(sql, (mid,))
+
+    def test_content_scope_status_and_counters_may_change(self):
+        mid = self.add_memory()
+        self.conn.execute(
+            "UPDATE memories SET scope = 'zone', scope_ref = 'C', confidence = 0.9, use_count = use_count + 1, "
+            "status = 'archived', updated_at = '2026-11-09T09:00:00Z', last_used_at = '2026-11-09T09:00:00Z' "
+            "WHERE id = ?", (mid,))
+        self.assertEqual(self.conn.execute("SELECT scope, status, use_count FROM memories WHERE id = ?", (mid,)).fetchone(),
+                         ("zone", "archived", 1))
+
+    def test_full_text_index_follows_content_changes(self):
+        mid = self.add_memory(content="Paletes bananeiras ficam no corredor D.")
+        self.conn.execute("UPDATE memories SET content = ? WHERE id = ?", ("Caixas frágeis vão para a zona B.", mid))
+        found = lambda term: [r[0] for r in self.conn.execute(
+            "SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?", (term,)).fetchall()]
+        self.assertEqual(found("bananeiras"), [])
+        self.assertEqual(found("frágeis"), [mid])
+
+    def test_only_the_supervisor_holds_memory_manage(self):
+        self.assertEqual(self.conn.execute(
+            "SELECT role_id FROM v_effective_permissions WHERE permission = 'memory.manage' ORDER BY role_id").fetchall(),
+            [(2,)])
+        for role_id in (1, 3, 4, 5):
+            self.assertFalse(is_allowed(self.conn, role_id, "memory.manage"), role_id)
+
+    def test_memory_write_is_unchanged(self):
+        self.assertEqual(self.conn.execute(
+            "SELECT role_id FROM v_effective_permissions WHERE permission = 'memory.write' ORDER BY role_id").fetchall(),
+            [(1,), (2,), (5,)])
+
+    def test_ai_role_cannot_be_granted_memory_manage(self):
+        self.assertDenied(
+            "INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, 'memory.manage', 'ALLOW')",
+            (AI_ROLE_ID,))
 
 
 if __name__ == "__main__":

@@ -76,11 +76,17 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 - Como os exemplos de plano das skills já passam pelo `DslParser`, a IA tem modelos válidos à mão, o que reduz rodadas de correção.
 - A IA também redige skills a pedido do supervisor (`propose_skill`); nada é gravado sem a confirmação dele.
 
+## 2.2 Memórias e contexto automático (feature 5)
+
+- Cada pedido recebe até 5 memórias do armazém e até 2 trechos de procedimento, limitados a 2.500 caracteres (~650 tokens no pior caso). Pedidos operacionais ("mova 10 do ABC-123") normalmente não recebem trecho nenhum: os identificadores saem da consulta e são exigidos 2 termos em comum.
+- A IA busca mais quando precisa (`search_knowledge`, `search_memories`) e registra regras e preferências ditas pelo operador (`remember`, até 2 por pedido).
+
 ## 3. RAG
 
 | Etapa | Definição |
 |-------|-----------|
-| Fontes | `knowledge/*.md` (22 documentos fictícios), `SKILL.md` das skills, descrições de receitas |
+| Estado | Feature 5 (2026-11-08): **só BM25** (FTS5, sem acento). Os embeddings e a busca híbrida ficam para uma etapa futura |
+| Fontes | `knowledge/*.md` (22 documentos fictícios, embutidos e indexados na abertura). As skills não entram: são carregadas sob demanda por `load_skill` |
 | Chunking | Um trecho por seção `##`, prefixado com título do documento e da seção; seções acima de ~500 tokens divididas com ~50 tokens de sobreposição |
 | Embeddings | `text-embedding-3-small`, 1.536 dimensões |
 | Banco vetorial | `sqlite-vec` no mesmo arquivo SQLite (`knowledge_vec`), ligado a `knowledge_chunks` |

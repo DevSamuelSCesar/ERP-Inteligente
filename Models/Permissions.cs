@@ -11,6 +11,8 @@ public static class Permissions
     public const string PlanApprove = "plan.approve";
     public const string RecipeManage = "recipe.manage";
     public const string SkillManage = "skill.manage";
+    public const string MemoryWrite = "memory.write";
+    public const string MemoryManage = "memory.manage";
     public const string AuditRead = "audit.read";
     public const string SensitiveRead = "sensitive.read";
     public const string UserManage = "user.manage";

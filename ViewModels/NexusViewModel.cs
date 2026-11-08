@@ -87,6 +87,8 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
                 : reply.Draft is { } draft ? [new NexusProposal("", "", [], draft, reply.Preview)] : [];
             if (proposals.Count > 0)
                 await ProposeAsync(proposals);
+            foreach (var note in reply.Memories ?? [])
+                Say(new MemoryNoteViewModel(note));
             if (reply.Skill is { } skill && skills is not null)
                 ProposeSkill(skill);
 

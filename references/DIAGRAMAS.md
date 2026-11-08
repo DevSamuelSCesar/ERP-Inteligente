@@ -28,9 +28,9 @@ flowchart TB
         end
 
         subgraph RAG["RAG"]
-            CHK["knowledge/*.md · SKILL.md<br/>chunking por seção ##"]
-            EMB["Embeddings<br/>1.536 dimensões"]
-            HYB["Busca híbrida<br/>BM25 + cosseno · top-4"]
+            CHK["knowledge/*.md<br/>chunking por seção ##"]
+            EMB["Embeddings<br/>1.536 dimensões · etapa futura"]
+            HYB["Busca BM25 (FTS5) hoje<br/>híbrida BM25 + cosseno depois"]
         end
 
         subgraph ENG["Motor determinístico · sem LLM"]

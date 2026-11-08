@@ -21,7 +21,7 @@ public sealed partial class ShellViewModel : ViewModelBase
     /// <param name="databaseDescription">Where the encrypted database lives, shown in Configurações.</param>
     public ShellViewModel(ISessionService session, IQueryService queries, IPlanService plans, INexusService nexus,
         IDialogService dialogs, TimeProvider time, AuditVerification auditStatus, string databaseDescription,
-        LlmSettingsService? llm = null, ISkillService? skills = null)
+        LlmSettingsService? llm = null, ISkillService? skills = null, IMemoryService? memories = null)
     {
         _user = session.Current;
         _plans = plans;
@@ -42,6 +42,7 @@ public sealed partial class ShellViewModel : ViewModelBase
             new("Parceiros", "Partners", () => new PartnersViewModel(queries), Permissions.StockRead),
             new("Planos", "Plans", () => new PlansViewModel(_user, plans, dialogs), Permissions.PlanSubmit, Permissions.PlanApprove, Permissions.AuditRead),
             new("Skills", "Skills", () => new SkillsViewModel(_user, skills!), skills is null ? NoSuchPermission : Permissions.StockRead),
+            new("Memórias", "Memory", () => new MemoriesViewModel(_user, memories!), memories is null ? NoSuchPermission : Permissions.StockRead),
             new("Receitas", "Recipes", () => new RecipesViewModel(queries), Permissions.StockRead),
             new("Auditoria", "Audit", () => new AuditViewModel(queries), Permissions.AuditRead),
         ];

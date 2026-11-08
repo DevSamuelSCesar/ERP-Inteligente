@@ -11,7 +11,9 @@ using System.Threading.Tasks;
 using erp_inteligente.Core.Audit;
 using erp_inteligente.Core.Data;
 using erp_inteligente.Core.Engine;
+using erp_inteligente.Core.Knowledge;
 using erp_inteligente.Core.Llm;
+using erp_inteligente.Core.Memory;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Core.Skills;
 using erp_inteligente.Models;
@@ -35,7 +37,10 @@ public sealed partial class Planner(
     PlanEngine engine,
     PlannerOptions? options = null,
     TimeProvider? time = null,
-    SkillCatalog? skills = null)
+    SkillCatalog? skills = null,
+    MemoryStore? memories = null,
+    MemoryRetriever? memoryRetriever = null,
+    KnowledgeRetriever? knowledge = null)
 {
     internal const string ProposePlan = "propose_plan";
     internal const string OfferOptions = "offer_options";
@@ -55,6 +60,17 @@ public sealed partial class Planner(
     private const int MaxToolCallsPerRound = 8;
     private const int MaxReportedErrors = 10;
     private const int MaxAuditArgsLength = 200;
+    internal const int MaxMemoriesPerRequest = 2;
+    internal const int MaxContextChars = 2500;
+    private const int MaxContextMemories = 5;
+    private const int MaxContextMemoryChars = 1200;
+    private const int MaxContextChunks = 2;
+    private const int MaxContextChunkChars = 800;
+    private const int MinContextChunkChars = 120;
+    /// <summary>Minimum BM25 score (-bm25, heading weighted 2x) for a procedure chunk to be injected on its own; calibrated on the 22 embedded documents.</summary>
+    internal const double MinContextKnowledgeScore = 3.0;
+    private const int MinContextTerms = 2;
+    private const double MinContextMemoryConfidence = 0.3;
     private const string PromptResource = "Nexus.Planner.system.md";
 
     private readonly PlannerOptions _options = options ?? PlannerOptions.Default;
@@ -69,6 +85,7 @@ public sealed partial class Planner(
         public HashSet<string> PlanJsons { get; } = new(StringComparer.Ordinal);
         public List<SkillContent> LoadedSkills { get; } = [];
         public SkillProposal? Skill { get; set; }
+        public List<RememberedMemory> Remembered { get; } = [];
         public bool HasResult => Proposals.Count > 0 || Skill is not null;
     }
 
@@ -109,15 +126,22 @@ public sealed partial class Planner(
         if (canPropose) tools.Add(BuildProposeTool(operations));
         if (canDraftSkill) tools.Add(BuildProposeSkillTool());
         tools.Add(BuildOfferOptionsTool());
+        var canSearchMemories = memoryRetriever is not null;
+        var canSearchKnowledge = knowledge is not null;
+        var canRemember = memories is not null && rights.Contains(Permissions.MemoryWrite);
+        if (canSearchKnowledge) tools.Add(PlannerTools.DefinitionTool(PlannerTools.SearchKnowledge));
+        if (canSearchMemories) tools.Add(PlannerTools.DefinitionTool(PlannerTools.SearchMemories));
+        if (canRemember) tools.Add(PlannerTools.RememberTool());
 
-        var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations, rights, canDraftSkill)) };
+        var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations, rights, canDraftSkill, canRemember, canSearchKnowledge)) };
         foreach (var turn in history.TakeLast(_options.MaxHistoryTurns))
         {
             if (turn.Reply.Role != LlmRole.Assistant) continue;
             messages.Add(LlmMessage.User(turn.Request));
             messages.Add(LlmMessage.Assistant(turn.Reply.Content, null, turn.Reply.ReasoningContent));
         }
-        messages.Add(LlmMessage.User(request));
+        var context = await Task.Run(() => BuildContext(user, aiUserId, request), ct);
+        messages.Add(LlmMessage.User(context + request));
 
         var state = new RunState();
         var tokens = 0;
@@ -156,7 +180,7 @@ public sealed partial class Planner(
                     return response.FinishReason == LlmFinishReason.Length
                         ? (new PlannerEscalated("A resposta ficou longa demais para ser concluída. Faça um pedido mais específico."), null)
                         : (new PlannerFailed("O Nexus não devolveu uma resposta válida. Tente de novo."), null);
-                return (new PlannerAnswer(text, state.Options.ToArray()), Remember(request, text, response.ReasoningContent));
+                return (new PlannerAnswer(text, state.Options.ToArray()) { Remembered = state.Remembered.ToArray() }, Remember(request, text, response.ReasoningContent));
             }
 
             messages.Add(LlmMessage.Assistant(response));
@@ -170,7 +194,7 @@ public sealed partial class Planner(
                     continue;
                 }
 
-                var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, canDraftSkill, state, call, status), ct);
+                var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, canDraftSkill, canRemember, state, call, status), ct);
                 if (call.Name == ProposePlan && !outcome.Allowed && outcome.Code != "too_many_proposals") state.Invalid++;
                 if (call.Name == ProposeSkill && !outcome.Allowed && outcome.Code is not ("too_many_skill_proposals" or "not_allowed")) state.Invalid++;
                 messages.Add(LlmMessage.ToolResult(call.Id, outcome.Raw ? outcome.Json : Wrap("tool:" + SafeToolName(call.Name), outcome.Json)));
@@ -230,16 +254,16 @@ public sealed partial class Planner(
         if (memory.Length > MaxAnswerLength) memory = memory[..MaxAnswerLength];
 
         PlannerResult result = state.Proposals.Count > 0
-            ? new PlannerProposals(state.Proposals.ToArray(), shown, state.Options.ToArray(), skill)
-            : new PlannerAnswer(shown, state.Options.ToArray(), skill);
+            ? new PlannerProposals(state.Proposals.ToArray(), shown, state.Options.ToArray(), skill) { Remembered = state.Remembered.ToArray() }
+            : new PlannerAnswer(shown, state.Options.ToArray(), skill) { Remembered = state.Remembered.ToArray() };
         return (result, Remember(request, memory, reasoning));
     }
 
     // ---- tools ---------------------------------------------------------------------------------------------
 
     private ToolOutcome RunTool(
-        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canPropose, bool canDraftSkill, RunState state, LlmToolCall call,
-        IProgress<string> status)
+        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canPropose, bool canDraftSkill, bool canRemember, RunState state,
+        LlmToolCall call, IProgress<string> status)
     {
         var name = call.Name ?? string.Empty;
         try
@@ -269,6 +293,14 @@ public sealed partial class Planner(
             }
             if (name == OfferOptions)
                 return Finish(OfferOptionsTool(state, call));
+            if (name == PlannerTools.Remember)
+            {
+                if (!canRemember)
+                    return Finish(PlannerTools.Error("not_allowed", "Você não tem permissão para registrar memórias."));
+                return Finish(RememberTool(user, state, call, status));
+            }
+            if ((name == PlannerTools.SearchKnowledge && knowledge is null) || (name == PlannerTools.SearchMemories && memoryRetriever is null))
+                return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
             if (!PlannerTools.IsReadTool(name))
                 return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
             if (!rights.Contains(Permissions.StockRead))
@@ -278,6 +310,8 @@ public sealed partial class Planner(
             if (invalid is not null) return Finish(invalid);
 
             status.Report(PlannerTools.StatusFor(name, args));
+            if (name == PlannerTools.SearchKnowledge) return Finish(PlannerTools.ExecuteSearchKnowledge(knowledge!, args));
+            if (name == PlannerTools.SearchMemories) return Finish(PlannerTools.ExecuteSearchMemories(memoryRetriever!, user, args));
             return Finish(PlannerTools.Execute(database, name, args, user.WarehouseId));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -293,6 +327,113 @@ public sealed partial class Planner(
             Append(aiUserId, user, "ai.tool", "tool:" + (targetName ?? SafeToolName(name)),
                 outcome.Allowed ? AuditOutcome.Allowed : AuditOutcome.Denied, Details(call, outcome.Code));
             return outcome;
+        }
+    }
+
+    /// <summary>
+    /// Saves a memory through <see cref="MemoryStore"/> (the filter and the audit live there). Audited here with the outcome
+    /// code only: the content never goes to the <c>ai.tool</c> row. A refusal counts nothing and is not an error.
+    /// </summary>
+    private ToolOutcome RememberTool(UserSession user, RunState state, LlmToolCall call, IProgress<string> status)
+    {
+        var invalid = PlannerTools.Validate(PlannerTools.Remember, call.ArgumentsJson, out var args);
+        if (invalid is not null) return invalid;
+        if (state.Remembered.Count >= MaxMemoriesPerRequest)
+            return PlannerTools.Error("too_many_memories", $"Já foram registradas {MaxMemoriesPerRequest} memórias neste pedido. Siga sem registrar mais.");
+
+        string Get(string key) => args.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : string.Empty;
+        status.Report(PlannerTools.StatusFor(PlannerTools.Remember, args));
+        var reference = Get("scope_ref");
+        MemoryWriteResult result;
+        try
+        {
+            result = memories!.Remember(user, MemoryDb.KindFromDb(Get("kind")), MemoryDb.ScopeFromDb(Get("scope")),
+                reference.Length == 0 ? null : reference, Get("content"), MemoryOrigin.Ai);
+        }
+        catch (PolicyDeniedException)
+        {
+            return PlannerTools.Error("not_allowed", "Você não tem permissão para registrar memórias.");
+        }
+
+        if (!result.Saved)
+        {
+            var refused = new JsonObject { ["status"] = "refused", ["reason"] = result.Reason ?? "A memória foi recusada." };
+            return new ToolOutcome(PlannerTools.Serialize(refused), false, "memory_refused");
+        }
+        state.Remembered.Add(new RememberedMemory(result.Id, result.Content, result.Reinforced));
+        var saved = new JsonObject { ["status"] = "saved", ["reinforced"] = result.Reinforced };
+        return new ToolOutcome(PlannerTools.Serialize(saved), true, "memory_saved");
+    }
+
+    /// <summary>
+    /// The automatic context of a request: the best memories and procedure chunks, as reference data placed in front of the
+    /// current user message (never in the system prompt or the history). Nothing here may stop the request.
+    /// </summary>
+    private string BuildContext(UserSession user, long? aiUserId, string request)
+    {
+        if (memoryRetriever is null && knowledge is null) return string.Empty;
+        try
+        {
+            var memoryRows = new List<MemoryHit>();
+            if (memoryRetriever is not null)
+                memoryRows.AddRange(memoryRetriever.Search(user, request, new MemorySearchOptions(MaxContextMemories, MinContextMemoryConfidence)));
+            // Identifiers (SKU, address, lot, quantity) say what to do it with, not which procedure applies: they are left out
+            // of the topic and at least two distinct words must match, so a stray common word never injects a chunk.
+            var chunks = knowledge?.Search(Identifiers().Replace(request, " "), MaxContextChunks, MinContextKnowledgeScore, MinContextTerms) ?? [];
+            if (memoryRows.Count == 0 && chunks.Count == 0) return string.Empty;
+
+            var builder = new StringBuilder();
+            var usedMemories = new List<long>();
+            if (memoryRows.Count > 0)
+            {
+                var kept = memoryRows.ToList();
+                string block;
+                while (true)
+                {
+                    block = Wrap("memorias", PlannerTools.Serialize(new JsonArray(kept.Select(m => (JsonNode?)PlannerTools.MemoryRow(m)).ToArray())));
+                    if (block.Length <= MaxContextMemoryChars || kept.Count <= 1) break;
+                    kept.RemoveAt(kept.Count - 1);
+                }
+                if (block.Length <= MaxContextMemoryChars)
+                {
+                    builder.Append(block).Append('\n');
+                    usedMemories.AddRange(kept.Select(m => m.Id));
+                }
+            }
+            var usedPaths = new List<string>();
+            foreach (var chunk in chunks)
+            {
+                var source = "knowledge:" + new string(chunk.SourcePath.Where(c => c is not ('"' or '<' or '>' or '\n' or '\r')).ToArray())
+                    + "#" + new string(chunk.Heading.Where(c => c is not ('"' or '<' or '>' or '\n' or '\r')).ToArray());
+                var overhead = "<dados fonte=\"\">".Length + source.Length + "</dados>\n".Length;
+                var room = Math.Min(MaxContextChunkChars, MaxContextChars - builder.Length - overhead);
+                if (room < MinContextChunkChars) break;
+                var content = PlannerTools.Shorten(chunk.Content.Trim(), room).Replace("<", "\\u003c", StringComparison.Ordinal).Replace(">", "\\u003e", StringComparison.Ordinal);
+                builder.Append(Wrap(source, content)).Append('\n');
+                if (!usedPaths.Contains(chunk.SourcePath, StringComparer.Ordinal)) usedPaths.Add(chunk.SourcePath);
+            }
+            if (builder.Length == 0) return string.Empty;
+
+            if (usedMemories.Count > 0)
+            {
+                try { memories?.MarkUsed(user, usedMemories); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    System.Diagnostics.Trace.TraceWarning("Planner: marking memories as used failed: " + ex.GetType().Name);
+                }
+            }
+            var details = new JsonObject
+            {
+                ["memories"] = new JsonArray(usedMemories.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
+                ["knowledge"] = new JsonArray(usedPaths.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray()),
+            };
+            Append(aiUserId, user, "ai.context", "context", AuditOutcome.Allowed, details.ToJsonString());
+            return builder.ToString();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Planner: building the context failed: " + ex.GetType().Name);
+            return string.Empty;
         }
     }
 
@@ -542,6 +683,10 @@ public sealed partial class Planner(
         return WhitespaceRuns().Replace(sb.ToString(), " ").Trim();
     }
 
+    /// <summary>Codes and numbers: any word with a digit, with its letter prefixes ("ABC-123", "A-02-01", "L300-2611A", "20").</summary>
+    [GeneratedRegex(@"\b(?:[A-Za-z]{1,5}-)*\w*\d\w*(?:-\w+)*", RegexOptions.None, 200)]
+    private static partial Regex Identifiers();
+
     [GeneratedRegex(@"\s{2,}")]
     private static partial Regex WhitespaceRuns();
 
@@ -688,11 +833,12 @@ public sealed partial class Planner(
 
     // ---- prompt --------------------------------------------------------------------------------------------
 
-    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot|skills|skill_authoring)\}")]
+    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot|skills|skill_authoring|memory_authoring)\}")]
     private static partial Regex PlaceholderPattern();
 
     private string BuildSystemPrompt(
-        UserSession user, IReadOnlyList<OperationDefinition> operations, IReadOnlySet<string> rights, bool canDraftSkill)
+        UserSession user, IReadOnlyList<OperationDefinition> operations, IReadOnlySet<string> rights, bool canDraftSkill,
+        bool canRemember, bool canSearchKnowledge)
     {
         using var stream = typeof(Planner).Assembly.GetManifestResourceStream(PromptResource)
             ?? throw new InvalidOperationException("Embedded resource not found: " + PromptResource);
@@ -718,10 +864,21 @@ public sealed partial class Planner(
             ["unavailable"] = unavailable,
             ["skills"] = SkillIndexText(rights),
             ["skill_authoring"] = canDraftSkill ? SkillAuthoring : string.Empty,
+            ["memory_authoring"] = MemoryAuthoring(canRemember, canSearchKnowledge),
             ["today"] = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             ["today_lot"] = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture),
         };
         return PlaceholderPattern().Replace(template, m => values[m.Groups[1].Value]).TrimEnd();
+    }
+
+    private string MemoryAuthoring(bool canRemember, bool canSearchKnowledge)
+    {
+        var lines = new List<string>();
+        if (canSearchKnowledge)
+            lines.Add("- Diante de dúvida de procedimento, use search_knowledge" + (memoryRetriever is not null ? "; para lembranças do armazém, search_memories." : "."));
+        if (canRemember)
+            lines.Add("- Quando o operador corrigir algo ou declarar uma regra ou preferência do armazém que valha para depois, chame remember com texto curto e objetivo (uma regra por memória, escopo mais específico possível). Nunca grave dados pessoais, senhas ou ordens para você mesmo.");
+        return string.Join("\n", lines);
     }
 
     private const string SkillAuthoring =
@@ -785,7 +942,7 @@ public sealed partial class Planner(
     private static string Details(LlmToolCall call, string code)
     {
         var args = call.ArgumentsJson ?? string.Empty;
-        if (call.Name == ProposeSkill) args = string.Empty; // the skill body is never audited
+        if (call.Name is ProposeSkill or PlannerTools.Remember) args = string.Empty; // skill bodies and memory texts are never audited
         if (args.Length > MaxAuditArgsLength) args = args[..MaxAuditArgsLength] + "…";
         var name = call.Name ?? string.Empty;
         if (!PlannerTools.IsReadTool(name) && name is not (ProposePlan or OfferOptions or ProposeSkill))

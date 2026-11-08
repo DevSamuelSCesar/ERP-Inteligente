@@ -19,6 +19,9 @@ public sealed record NexusOption(string Label, string Request);
 /// <summary>A skill drafted by the Nexus. It is saved only when a supervisor confirms it; <see cref="CurrentVersion"/> is set when the name already exists.</summary>
 public sealed record NexusSkillProposal(erp_inteligente.Core.Skills.SkillDocument Document, string Reason, int? CurrentVersion);
 
+/// <summary>A memory the Nexus saved (or reinforced) while handling the request; shown to the operator, who can manage it in Memórias.</summary>
+public sealed record NexusMemoryNote(string Content, bool Reinforced);
+
 /// <summary>
 /// Answer of the Nexus to a request: short plain text, up to three alternative proposals (or a single
 /// <see cref="Draft"/>) and suggested next steps. Proposals are only written after the requester confirms one.
@@ -32,7 +35,8 @@ public sealed record NexusReply(
     bool IsEscalated = false,
     IReadOnlyList<NexusProposal>? Proposals = null,
     IReadOnlyList<NexusOption>? Options = null,
-    NexusSkillProposal? Skill = null);
+    NexusSkillProposal? Skill = null,
+    IReadOnlyList<NexusMemoryNote>? Memories = null);
 
 /// <summary>Turns a natural-language request into a reply or a plan (the Planner, seen from the UI).</summary>
 public interface INexusService

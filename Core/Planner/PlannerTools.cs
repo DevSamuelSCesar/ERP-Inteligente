@@ -68,6 +68,10 @@ internal static partial class PlannerTools
         // Not in ReadToolNames: offered by the Planner only when it has a skill catalog, and run by it (not by Execute).
         [LoadSkill] = ("Carrega o texto de uma skill (procedimento aprovado) pelo nome do índice do prompt. No máximo 3 por pedido.",
             ObjectSchema(("nome", """{"type":"string","pattern":"^[a-z][a-z_]{1,39}$","description":"Nome da skill, como no índice"}"""), required: ["nome"])),
+        // Not in ReadToolNames: offered only when the Planner has the retrievers / the right (run by the Planner, not by Execute).
+        [SearchKnowledge] = (SearchKnowledgeDescription, SearchKnowledgeSchema),
+        [SearchMemories] = (SearchMemoriesDescription, SearchMemoriesSchema),
+        [Remember] = (RememberDescription, RememberSchema),
         [SearchLocations] = (SearchLocationsDescription, SearchLocationsSchema),
         [SearchZones] = (SearchZonesDescription, SearchZonesSchema),
         [SearchLots] = (SearchLotsDescription, SearchLotsSchema),
@@ -81,6 +85,8 @@ internal static partial class PlannerTools
     internal static IEnumerable<LlmTool> ReadTools() =>
         ReadToolNames.Select(n => new LlmTool(n, Definitions[n].Description, Definitions[n].Schema));
 
+    internal static LlmTool DefinitionTool(string name) => new(name, Definitions[name].Description, Definitions[name].Schema);
+
     internal static LlmTool LoadSkillTool() => new(LoadSkill, Definitions[LoadSkill].Description, Definitions[LoadSkill].Schema);
 
     internal static bool IsReadTool(string name) => Definitions.ContainsKey(name);
@@ -92,6 +98,9 @@ internal static partial class PlannerTools
         return tool switch
         {
             LoadSkill => $"Lendo a skill {Get("nome")}",
+            SearchKnowledge => "Consultando procedimentos",
+            SearchMemories => "Consultando memórias",
+            Remember => "Registrando memória",
             SearchProducts => SearchStatus(args),
             GetProduct => $"Consultando o produto {Get("sku")}",
             GetStock when Get("sku") is { } sku => $"Consultando saldo do {sku}",

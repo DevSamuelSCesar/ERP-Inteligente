@@ -6,9 +6,10 @@ using Microsoft.Data.Sqlite;
 namespace Nexus.Tests.Core.Data;
 
 /// <summary>
-/// Databases created by schema versions 1 to 4 (scripts copied from git history into Fixtures/) are upgraded to the
+/// Databases created by schema versions 1 to 5 (scripts copied from git history into Fixtures/) are upgraded to the
 /// current version on open, keeping their data. Version 2 → 3 adds the catalog flags, the AI operational rights and
 /// the v_ai_* views (migrations/003_full_catalog.sql). Version 4 → 5 adds skills and v_ai_skills (migrations/005_skills.sql).
+/// Version 5 → 6 rebuilds memories with warehouse, status and origin, and guards them (migrations/006_memory.sql).
 /// </summary>
 public sealed class MigrationTests : IDisposable
 {
@@ -19,6 +20,7 @@ public sealed class MigrationTests : IDisposable
     private static readonly string[] Version2Scripts = ["schema_v2.sql", "security_v2.sql", "seed_v2.sql"];
     private static readonly string[] Version3Scripts = ["schema_v3.sql", "security_v3.sql", "seed_v3.sql"];
     private static readonly string[] Version4Scripts = ["schema_v4.sql", "security_v4.sql", "seed_v4.sql"];
+    private static readonly string[] Version5Scripts = ["schema_v5.sql", "security_v5.sql", "seed_v5.sql"];
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "nexus-tests-" + Guid.NewGuid().ToString("N"));
     private readonly InMemorySecretStore _store = new();
@@ -71,10 +73,31 @@ public sealed class MigrationTests : IDisposable
     private NexusDatabase Open(string? path = null) =>
         DatabaseBootstrapper.OpenOrCreate(path ?? _path, new KeyManager(_store));
 
-    /// <summary>Checks what the current schema (version 5) must have: migrations/005_skills.sql on top of the version 4 objects.</summary>
+    /// <summary>Checks what the current schema (version 6) must have: migrations/006_memory.sql on top of the version 5 objects.</summary>
+    private static void AssertVersion6Schema(SqliteConnection c)
+    {
+        Assert.Equal(6L, Scalar(c, "PRAGMA user_version"));
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'memories'"));
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name = 'memories_by_warehouse'"));
+        Assert.Equal(5L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name IN " +
+            "('memories_fts_insert', 'memories_fts_delete', 'memories_fts_update', 'memories_deny_delete', 'memories_guard_update')"));
+        Assert.Equal("id,warehouse_id,kind,scope,scope_ref,content,confidence,use_count,status,origin,created_by,source_plan_id,created_at,updated_at,last_used_at",
+            ColumnList(c, "memories"));
+        // The four seeded memories keep their ids and text, and get CD-01, active status, user origin and sup.maria as creator.
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM memories WHERE warehouse_id = 1 AND status = 'active' AND origin = 'user' AND created_by = 2"));
+        Assert.Equal("armazenagem", Scalar(c,
+            "SELECT m.scope_ref FROM memories_fts f JOIN memories m ON m.id = f.rowid WHERE memories_fts MATCH 'refrigerados'"));
+        // Supervisor (2) may manage memories; nobody else does, and the AI never does.
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM v_effective_permissions WHERE role_id = 2 AND permission = 'memory.manage'"));
+        Assert.Equal(0L, Scalar(c, "SELECT count(*) FROM v_effective_permissions WHERE permission = 'memory.manage' AND role_id <> 2"));
+        Assert.Equal(1L, Scalar(c,
+            "SELECT count(*) FROM role_permissions WHERE role_id = 5 AND effect = 'DENY' AND permission = 'memory.manage'"));
+        AssertVersion5Schema(c);
+    }
+
+    /// <summary>Checks what migrations/005_skills.sql must have produced (same as a fresh schema 5 database).</summary>
     private static void AssertVersion5Schema(SqliteConnection c)
     {
-        Assert.Equal(5L, Scalar(c, "PRAGMA user_version"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name IN ('skills', 'skill_versions')"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name IN " +
             "('skills_deny_delete', 'skills_guard_update', 'skill_versions_deny_update', 'skill_versions_deny_delete')"));
@@ -140,46 +163,82 @@ public sealed class MigrationTests : IDisposable
         using var db = Open();
         using var c = db.OpenApplication();
 
-        AssertVersion5Schema(c);
+        AssertVersion6Schema(c);
     }
 
     [Fact]
-    public void Version_3_database_is_upgraded_to_5_with_the_reservation_backfill()
+    public void Version_3_database_is_upgraded_to_6_with_the_reservation_backfill()
     {
         var path = CreateLegacyDatabase("v3.db", 3, Version3Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion5Schema(c);
+        AssertVersion6Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_2_database_is_upgraded_to_5_and_keeps_its_data()
+    public void Version_2_database_is_upgraded_to_6_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v2.db", 2, Version2Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion5Schema(c);
+        AssertVersion6Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_4_database_is_upgraded_to_5_and_keeps_its_data()
+    public void Version_4_database_is_upgraded_to_6_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v4.db", 4, Version4Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion5Schema(c);
+        AssertVersion6Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM order_reservations"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
+    }
+
+    [Fact]
+    public void Version_5_database_is_upgraded_to_6_and_keeps_its_memories_and_search()
+    {
+        var path = CreateLegacyDatabase("v5.db", 5, Version5Scripts);
+        using var db = Open(path);
+        using var c = db.OpenApplication();
+
+        AssertVersion6Schema(c);
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
+        Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
+        Assert.True(AuditVerifier.Verify(c).IsValid);
+    }
+
+    [Fact]
+    public void Migrated_database_guards_memories()
+    {
+        using var db = Open(CreateLegacyDatabase("v5-memory.db", 5, Version5Scripts));
+        using var c = db.OpenApplication();
+
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() => Exec(c, "DELETE FROM memories WHERE id = 1")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE memories SET warehouse_id = 2 WHERE id = 1")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE memories SET origin = 'ai' WHERE id = 1")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE memories SET created_by = 1 WHERE id = 1")).Message);
+        Assert.Contains("CHECK", Assert.Throws<SqliteException>(() =>
+            Exec(c, "INSERT INTO memories (warehouse_id, kind, scope, content, origin) VALUES (1, 'fact', 'mundo', 'x', 'ai')")).Message);
+
+        // Content may change, and the full-text index follows it.
+        Exec(c, "UPDATE memories SET content = 'Caixas frágeis vão para a zona B.' WHERE id = 1");
+        Assert.Equal(0L, Scalar(c, "SELECT count(*) FROM memories_fts WHERE memories_fts MATCH 'refrigerados'"));
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM memories_fts WHERE memories_fts MATCH 'frágeis'"));
     }
 
     [Fact]
@@ -215,6 +274,7 @@ public sealed class MigrationTests : IDisposable
     [InlineData("role.manage")]
     [InlineData("audit.read")]
     [InlineData("skill.manage")]
+    [InlineData("memory.manage")]
     public void Migrated_database_refuses_escalation_of_the_ai_role(string permission)
     {
         using var db = Open();

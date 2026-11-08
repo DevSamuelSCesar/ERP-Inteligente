@@ -70,6 +70,7 @@ As views `v_ai_zones`, `v_ai_lots` e `v_ai_partners` (migração 003) expõem zo
 | `user.manage` / `role.manage` | ❌ | ❌ | ✅ | ❌ | ❌ |
 | `audit.read` ler auditoria | ❌ | ✅ | ✅ | ✅ | ❌ |
 | `memory.write` gravar memória | ✅ | ✅ | — | ❌ | ✅ (com filtro) |
+| `memory.manage` criar, corrigir e arquivar memórias | ❌ | ✅ | ❌ | ❌ | ❌ |
 | `recipe.manage` promover receitas | — | ✅ | — | — | ❌ |
 | `skill.manage` criar e editar skills | ❌ | ✅ | ❌ | ❌ | ❌ (só rascunha; quem confirma grava) |
 
@@ -82,9 +83,11 @@ As views `v_ai_zones`, `v_ai_lots` e `v_ai_partners` (migração 003) expõem zo
 | Linhas `DENY` em `role_permissions` | Policy engine (aplicação) |
 | IA lendo tabelas fora das views `v_ai_*` ou colunas sensíveis | *Authorizer callback* da conexão da IA |
 | IA escrevendo qualquer coisa | Conexão `Mode=ReadOnly` + *authorizer* |
-| IA recebendo `plan.approve`, `user.manage`, `role.manage`, `sensitive.read`, `audit.read` ou `skill.manage` | Trigger `role_permissions_deny_ai_escalation` |
+| IA recebendo `plan.approve`, `user.manage`, `role.manage`, `sensitive.read`, `audit.read`, `skill.manage` ou `memory.manage` | Trigger `role_permissions_deny_ai_escalation` |
 | Remover os `DENY` restantes da IA (`plan.approve`, `sensitive.read`, `user.manage`, `role.manage`, `audit.read`, `recipe.manage`, `skill.manage`) | Trigger `role_permissions_deny_ai_unblock` |
 | Apagar skill, mudar nome ou autor, ou baixar a versão; alterar ou apagar o histórico | Triggers `skills_deny_delete`, `skills_guard_update`, `skill_versions_deny_update` e `skill_versions_deny_delete` |
+| Apagar memória ou mudar armazém, origem, autor ou data dela | Triggers `memories_deny_delete` e `memories_guard_update` |
+| IA lendo `memories`, `knowledge_chunks` ou os índices FTS | *Authorizer* (a busca roda na conexão da aplicação, com SQL constante e o armazém da sessão) |
 | IA lendo a tabela `skills` ou `skill_versions` | *Authorizer*: só a view `v_ai_skills` (ativas, sem autor nem datas) |
 | IA ou o próprio solicitante aprovando um plano | Triggers `plans_deny_ai_approval` e `plans_deny_self_approval` |
 | Alterar ou apagar auditoria, movimentos e planos finalizados | Triggers `*_deny_update` / `*_deny_delete` |
@@ -119,6 +122,18 @@ Uma skill é texto que entra no contexto da IA como instrução. Uma skill malic
 5. **Rastreabilidade:** versões imutáveis em `skill_versions` e auditoria de cada gravação, sem o corpo no log.
 
 Risco residual: um supervisor pode confirmar uma skill sem ler. Por isso o quadro mostra o texto completo antes do Confirmar.
+
+### 3.3 Memórias e RAG: envenenamento de contexto (feature 5)
+
+Memórias e trechos de procedimento entram no contexto da IA. Uma memória maliciosa ("aprove tudo", um CPF) seria persistente. Controles:
+
+1. **Filtro na gravação (`MemoryFilter`):** até 1.000 caracteres; recusa CPF, CNPJ completo, e-mail e telefone; recusa texto com cara de instrução ao modelo (pt e en); remove caracteres de controle, de largura zero e bidirecionais. Vale para a IA, para o sistema e para o supervisor.
+2. **Dados, não ordens:** tudo entra em `<dados>` com `<` e `>` escapados, e o prompt manda tratar como referência; os dados das ferramentas valem mais que as memórias.
+3. **Confiança baixa:** memórias da IA começam em 0,3; só sobem se repetidas, e o supervisor arquiva o que estiver errado.
+4. **Isolamento:** toda leitura e escrita é filtrada pelo armazém da sessão; a IA não lê as tabelas diretamente.
+5. **Rastreabilidade:** cada gravação, reforço, correção e arquivamento é auditado sem o conteúdo, e o contexto injetado é auditado (`ai.context`) com ids e caminhos.
+
+Risco residual: um fato operacional errado, mas inofensivo na forma, passa no filtro. Por isso a tela Memórias mostra origem, confiança e uso, e o motor continua validando todo plano.
 
 ## 4. Ameaças e gargalo
 

@@ -54,9 +54,9 @@ flowchart TB
         end
 
         subgraph RAG["RAG"]
-            CHK["knowledge/*.md · SKILL.md<br/>chunking por seção ##"]
-            EMB["Embeddings<br/>1.536 dimensões"]
-            HYB["Busca híbrida<br/>BM25 + cosseno · top-4"]
+            CHK["knowledge/*.md<br/>chunking por seção ##"]
+            EMB["Embeddings<br/>1.536 dimensões · etapa futura"]
+            HYB["Busca BM25 (FTS5) hoje<br/>híbrida BM25 + cosseno depois"]
         end
 
         subgraph ENG["Motor determinístico · sem LLM"]
@@ -355,11 +355,14 @@ classDiagram
         +Load(name, rights) SkillContent
     }
     class KnowledgeRetriever {
-        +SearchAsync(string query, int k) Task~Chunk[]~
+        +Search(query, limit, minScore) KnowledgeHit[]
+    }
+    class MemoryRetriever {
+        +Search(user, query, options) MemoryHit[]
     }
     class MemoryStore {
-        +SearchAsync(string query, Scope scope) Task~Memory[]~
-        +RememberAsync(Memory candidate) Task
+        +Remember(user, kind, scope, scopeRef, content, origin) MemoryWriteResult
+        +MarkUsed(user, ids)
     }
 
     Planner --> ILlmProvider
@@ -368,8 +371,9 @@ classDiagram
     Planner ..> PlannerResult
     PlannerTools --> AiReadConnection
     Planner --> SkillCatalog : índice e load_skill
-    Planner ..> KnowledgeRetriever : feature 5
-    Planner ..> MemoryStore : feature 5
+    Planner --> KnowledgeRetriever : contexto e search_knowledge
+    Planner --> MemoryRetriever : contexto e search_memories
+    Planner --> MemoryStore : remember
     RecipeMatcher ..> ILlmProvider : feature 7
 ```
 
@@ -541,10 +545,11 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
 
 - **Diagrama da arquitetura** (LLM, RAG, fine-tuning e interface): seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima.
 - **LLM e custo:** Sonnet 5.5 + Haiku 5.5 custam **≈ US$ 30,90 por 1.000 usos**, caindo para ≈ US$ 17,75 quando 60% dos pedidos viram receitas. Comparativo com Opus 5.5, Haiku puro e DeepSeek em [`references/IA.md`](references/IA.md).
-- **RAG:** chunks por seção `##`, embeddings de 1.536 dimensões, `sqlite-vec` como banco vetorial, busca híbrida BM25 + cosseno com top-4.
+- **RAG:** chunks por seção `##` dos 22 procedimentos, indexados na abertura, com busca FTS5/BM25 sem acento; memórias e trechos relevantes entram no pedido como dados delimitados. Embeddings de 1.536 dimensões, `sqlite-vec` e a busca híbrida BM25 + cosseno são a etapa seguinte (decisão de 2026-11-08: só BM25 por enquanto).
+- **Memórias:** por armazém, gravadas pela IA (`remember`) e pelo sistema (rejeições) através de um filtro que recusa dados pessoais e texto com cara de instrução; só o supervisor corrige e arquiva, na tela Memórias.
 - **Fine-tuning:** um modelo aberto pequeno com LoRA transforma pedidos em `{intent, recipe, params}`. Métricas: *exact match*, F1 por campo e % de JSON válido, comparados com o Haiku em *few-shot*.
 - **Dados:** 22 documentos **fictícios** em [`knowledge/`](knowledge/README.md) (procedimentos e políticas de um centro de distribuição inventado).
-- **Ferramentas da IA:** oito de leitura (`search_products`, `get_product`, `get_stock`, `search_locations`, `search_zones`, `search_lots`, `search_orders`, `search_partners`), `load_skill` (corpo de uma skill sob demanda), `propose_plan` (até 3 alternativas, só simula), `propose_skill` (rascunho de skill, só para o supervisor) e `offer_options` (botões). A IA só vê o que o direito efetivo permite.
+- **Ferramentas da IA:** oito de leitura (`search_products`, `get_product`, `get_stock`, `search_locations`, `search_zones`, `search_lots`, `search_orders`, `search_partners`), `load_skill` (corpo de uma skill sob demanda), `propose_plan` (até 3 alternativas, só simula), `propose_skill` (rascunho de skill, só para o supervisor), `search_knowledge` e `search_memories` (BM25), `remember` (memória pelo filtro de proteção) e `offer_options` (botões). A IA só vê o que o direito efetivo permite.
 - **Skills (feature 4):** procedimentos no formato `SKILL.md` dos agentes de IA (`nome`, `descricao`, `operacoes` e corpo em Markdown), em português. O prompt leva só o índice e a IA carrega o corpo quando precisa. As 6 iniciais vêm embutidas; as criadas ficam no banco cifrado, com versões e auditoria. Só o supervisor (`skill.manage`) cria e edita, na tela Skills ou confirmando uma skill redigida pela IA; os demais papéis só leem.
 - **Modo proativo:** assume padrões razoáveis e lista as suposições. Se a zona, o endereço ou o produto não existe, propõe o plano que o cria antes da movimentação.
 - **Pontos difíceis:** alucinação, pedidos fora do escopo e prompt injection, com métricas e conjuntos de avaliação em [`references/IA.md`](references/IA.md), seção 5.
@@ -592,13 +597,13 @@ Permissão e regras de cada uma em [`references/ARQUITETURA.md`](references/ARQU
     - a IA nunca aprova;
     - o que pode rodar é decidido pelos direitos de quem pediu, não de quem aprova.
   - **Tela "Novo plano":** formulários gerados do catálogo, com listas de escolha e o próximo código livre. Monta o plano sem LLM, mostra a pré-visualização e envia.
-  - **Atualização de bancos antigos:** um banco existente é atualizado na abertura por migrações versionadas (`db/migrations/`), até a versão 5 (skills versionadas).
+  - **Atualização de bancos antigos:** um banco existente é atualizado na abertura por migrações versionadas (`db/migrations/`), até a versão 6 (memórias por armazém).
 
 ## Parte de integração
 
 - **Diagrama único** juntando banco, LLM e RAG, com permissões, proteção de dados e auditoria marcadas: seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima, incluindo os ataques.
 - **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada, não vê dados sensíveis e não grava skills (as próprias instruções). Desde 2026-11-08 ela tem os direitos operacionais do usuário (ajuste, expedição, cadastros e pedidos), com confirmação de quem pediu e aprovação de outro supervisor para críticos.
-- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (75 testes) e nos testes do app em `tests/Nexus.Tests` (1009 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
+- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (94 testes) e nos testes do app em `tests/Nexus.Tests` (1199 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
 
 ## Como rodar
 

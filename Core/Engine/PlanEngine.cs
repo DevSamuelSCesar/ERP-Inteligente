@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using erp_inteligente.Core.Audit;
 using erp_inteligente.Core.Data;
+using erp_inteligente.Core.Memory;
+using erp_inteligente.Core.Skills;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Models;
 using Microsoft.Data.Sqlite;
@@ -43,8 +45,10 @@ public sealed class PlanEngine
     private readonly TimeProvider _time;
     private readonly PlanSimulator _simulator;
     private readonly PlanExecutor _executor;
+    private readonly MemoryStore? _memories;
 
-    public PlanEngine(NexusDatabase database, PolicyEngine policy, AuditLog audit, TimeProvider time)
+    /// <param name="memories">When set, rejecting an AI plan also saves a system correction memory (null = off).</param>
+    public PlanEngine(NexusDatabase database, PolicyEngine policy, AuditLog audit, TimeProvider time, MemoryStore? memories = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(policy);
@@ -54,6 +58,7 @@ public sealed class PlanEngine
         _policy = policy;
         _audit = audit;
         _time = time;
+        _memories = memories;
         _simulator = new PlanSimulator(database, time);
         _executor = new PlanExecutor(database, time);
     }
@@ -188,6 +193,45 @@ public sealed class PlanEngine
             AuditActorType.User, approver.UserId, null, "plan.reject", PlanTarget(planId), AuditOutcome.Allowed,
             new JsonObject { ["reason"] = trimmed, ["requested_by"] = row.RequestedBy }.ToJsonString()));
         transaction.Commit();
+
+        if (_memories is not null && row.PlannedBy == "ai")
+            RememberRejection(approver, planId, trimmed);
+    }
+
+    /// <summary>
+    /// The supervisor's reason becomes a system correction memory (scope: the plan's skill, else global). The memory filter
+    /// applies; a refusal or any error saves nothing and never affects the rejection, which is already committed.
+    /// </summary>
+    private void RememberRejection(UserSession approver, long planId, string reason)
+    {
+        try
+        {
+            string? skill = null;
+            string? intent = null;
+            using (var connection = _database.OpenApplication())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT skill, intent FROM plans WHERE id = $id";
+                command.Parameters.AddWithValue("$id", planId);
+                using var reader = command.ExecuteReader();
+                if (reader.Read())
+                {
+                    skill = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    intent = reader.IsDBNull(1) ? null : reader.GetString(1);
+                }
+            }
+            var scope = SkillDocument.IsValidName(skill) ? MemoryScope.Skill : MemoryScope.Global;
+            // The intent is model-written: only a short plain identifier is quoted.
+            var quotedIntent = intent is { Length: > 0 and <= 40 } && intent.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')
+                ? $" (plano: {intent})"
+                : string.Empty;
+            _memories!.Remember(approver, MemoryKind.Correction, scope, scope == MemoryScope.Skill ? skill : null,
+                "Plano rejeitado: " + reason + quotedIntent, MemoryOrigin.System, planId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Saving the rejection memory failed: " + ex.GetType().Name);
+        }
     }
 
     // ---- decisions -------------------------------------------------------------------------------------------

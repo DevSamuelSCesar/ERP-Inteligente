@@ -176,11 +176,12 @@ O risco do plano é o **maior risco** entre seus passos.
 |------------|------|--------|
 | Consultas de domínio (`get_stock`, `search_locations`, `search_orders`, `search_partners`...) | Leitura | Respostas compactas e paginadas |
 | `search_memories` | Leitura | Busca memórias além das já injetadas no contexto |
+| `search_knowledge` | Leitura | Busca trechos dos procedimentos (`knowledge/`) |
 | `search_recipes` | Leitura | Busca receitas similares para usar como base |
 | `load_skill` | Leitura | Carrega o corpo de uma skill do índice |
 | `propose_skill` | Rascunho (só quem tem `skill.manage`) | Propõe uma skill nova ou uma nova versão; nada é gravado até o supervisor confirmar |
 | `propose_plan` | Escrita (via motor, só simula) | Única porta de entrada para alterar dados; nada é gravado antes da confirmação de quem pediu |
-| `remember` | Memória | Registra uma memória candidata (seção 8) |
+| `remember` | Memória | Registra uma memória pelo filtro de proteção (seção 8), até 2 por pedido |
 
 As operações oferecidas vêm do direito efetivo (IA ∩ usuário), não da skill: as operações que uma skill declara servem de índice e de validação dos exemplos (seção 9).
 
@@ -245,6 +246,12 @@ Tabela `memories` no SQLite:
 - **Origem:** correções do operador, rejeições na aprovação, erros de validação recorrentes e o resultado das execuções.
 - **Busca:** FTS5 com ranking BM25, combinado com filtro por escopo, confiança e recência.
 - **Manutenção:** um job periódico deduplica, mescla memórias parecidas e descarta as de baixa confiança ou sem uso.
+- **Estado (feature 5, 2026-11-08):**
+  - Cada memória pertence a um armazém (`warehouse_id`) e tem `status` (ativa ou arquivada), `origin` (`ai`, `system` ou `user`) e autor. Memórias não são apagadas, só arquivadas (trigger).
+  - **Gravação automática:** a IA chama `remember` (exige `memory.write` no direito efetivo; confiança inicial 0,3), e a rejeição de um plano da IA vira uma correção de origem `system` (0,6). Uma memória igual já existente é reforçada (+0,1, até 0,9) em vez de duplicada.
+  - **Gestão:** só o supervisor (`memory.manage`) cria à mão (0,8), corrige, arquiva e reativa, na tela Memórias.
+  - **Contexto automático:** antes da primeira chamada ao LLM, o pedido busca até 5 memórias ativas do armazém (confiança ≥ 0,3) e até 2 trechos de `knowledge/`. Para os trechos, os identificadores (SKU, endereço, números) saem da consulta e são exigidos ao menos 2 termos em comum e uma pontuação mínima, para que pedidos operacionais não gastem tokens com procedimentos. Tudo entra no início da mensagem do pedido, em `<dados fonte="memorias">` e `<dados fonte="knowledge:caminho#seção">`, até 2.500 caracteres, e é auditado como `ai.context` (só ids e caminhos).
+  - **Busca:** FTS5/BM25 sem acento; cada termo do usuário vira um termo entre aspas, nunca sintaxe do FTS. As memórias são ordenadas por BM25, confiança e um bônus quando o escopo aparece no pedido. A busca roda na conexão da aplicação, com SQL constante e o armazém da sessão: a conexão da IA continua sem acesso aos índices FTS, que guardam memórias de todos os armazéns.
 - **Proteção:** memórias passam por um filtro antes de serem gravadas: tamanho máximo de 1.000 caracteres, sem dados sensíveis (CPF, e-mail, telefone, CNPJ completo) e sem texto que pareça instrução ao modelo. Memórias criadas a partir de conteúdo externo entram com confiança baixa.
 
 ### RAG
@@ -253,10 +260,10 @@ Tabela `memories` no SQLite:
 |-------|---------|
 | Fontes | Procedimentos e políticas do armazém (`knowledge/*.md`), `SKILL.md` das skills e descrições de receitas |
 | Chunking | Um trecho por seção `##` do Markdown, com o título do documento e da seção no início do trecho; seções acima de ~500 tokens são divididas com sobreposição de ~50 tokens |
-| Embeddings | `text-embedding-3-small` (OpenAI, 1.536 dimensões). Anthropic e DeepSeek não oferecem API de embeddings. Alternativa local, sem enviar texto para fora: um modelo de embeddings aberto rodando na própria máquina |
+| Embeddings | **Etapa futura** (decisão de 2026-11-08: só BM25 por enquanto). Opções: `text-embedding-3-small` (OpenAI, 1.536 dimensões) ou um modelo aberto local; Anthropic e DeepSeek não oferecem API de embeddings. A interface `IEmbeddingProvider` já existe, sem uso |
 | Banco vetorial | `sqlite-vec` (tabela virtual `vec0`) no mesmo arquivo SQLite, ligada a `knowledge_chunks` |
-| Busca | Híbrida: top-20 do FTS5/BM25 + top-20 por similaridade de cosseno, combinados por *Reciprocal Rank Fusion*; os 4 melhores trechos entram no contexto |
-| Atualização | Cada trecho guarda o SHA-256 do conteúdo; só trechos alterados geram embedding de novo |
+| Busca | Hoje: FTS5/BM25 (título da seção com peso 2). Com os embeddings: híbrida, top-20 do BM25 + top-20 por cosseno, combinados por *Reciprocal Rank Fusion* |
+| Atualização | Os documentos vêm embutidos no app e são indexados na abertura (`KnowledgeIndexer`); cada trecho guarda o SHA-256 e só trechos alterados são regravados |
 
 Os trechos recuperados entram no prompt **delimitados como dados de referência**, com o caminho do documento de origem, e nunca como instruções (seção 12.8).
 

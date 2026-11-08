@@ -211,11 +211,14 @@ classDiagram
         +Load(name, rights) SkillContent
     }
     class KnowledgeRetriever {
-        +SearchAsync(string query, int k) Task~Chunk[]~
+        +Search(query, limit, minScore) KnowledgeHit[]
+    }
+    class MemoryRetriever {
+        +Search(user, query, options) MemoryHit[]
     }
     class MemoryStore {
-        +SearchAsync(string query, Scope scope) Task~Memory[]~
-        +RememberAsync(Memory candidate) Task
+        +Remember(user, kind, scope, scopeRef, content, origin) MemoryWriteResult
+        +MarkUsed(user, ids)
     }
 
     Planner --> ILlmProvider
@@ -224,8 +227,9 @@ classDiagram
     Planner ..> PlannerResult
     PlannerTools --> AiReadConnection
     Planner --> SkillCatalog : índice e load_skill
-    Planner ..> KnowledgeRetriever : feature 5
-    Planner ..> MemoryStore : feature 5
+    Planner --> KnowledgeRetriever : contexto e search_knowledge
+    Planner --> MemoryRetriever : contexto e search_memories
+    Planner --> MemoryStore : remember
     RecipeMatcher ..> ILlmProvider : feature 7
 ```
 
