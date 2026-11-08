@@ -29,18 +29,16 @@ internal static partial class PlannerTools
 
     internal const string GetProduct = "get_product";
     internal const string GetStock = "get_stock";
-    internal const string FindLocation = "find_location";
-    internal const string ListInbound = "list_inbound_orders";
-    internal const string ListOutbound = "list_outbound_orders";
 
-    internal static readonly string[] ReadToolNames = [SearchProducts, GetProduct, GetStock, FindLocation, ListInbound, ListOutbound];
+    internal static readonly string[] ReadToolNames =
+        [SearchProducts, GetProduct, GetStock, SearchLocations, SearchZones, SearchLots, SearchOrders, SearchPartners];
 
-    private static readonly string[] InboundStatuses = ["expected", "receiving", "received", "cancelled"];
-    private static readonly string[] OutboundStatuses = ["open", "reserved", "picking", "shipped", "cancelled"];
+    /// <summary>The search tools that share the free-text and paging arguments (checked by <see cref="InvalidSharedFields"/>).</summary>
+    private static readonly HashSet<string> SharedSearchTools =
+        new([SearchLocations, SearchZones, SearchLots, SearchOrders, SearchPartners], StringComparer.Ordinal);
 
     private const string SkuRx = "^[A-Z]{3}-[0-9]{3}$";
     private const string LocationRx = "^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$";
-    private const string ZoneRx = "^[A-Z]{1,4}$";
 
     // \z instead of $: the JSON Schema "$" would accept a trailing newline.
     [GeneratedRegex(@"^[A-Z]{3}-[0-9]{3}\z")] private static partial Regex Sku();
@@ -64,14 +62,11 @@ internal static partial class PlannerTools
             ObjectSchema(
                 ("sku", $$"""{"type":"string","pattern":"{{SkuRx}}"}"""),
                 ("location", $$"""{"type":"string","pattern":"{{LocationRx}}","description":"Endereço, ex.: A-01-01 ou DOCA-01"}"""))),
-        [FindLocation] = ("Endereços ativos do armazém com capacidade, ocupação e espaço livre.",
-            ObjectSchema(
-                ("zone", $$"""{"type":"string","pattern":"{{ZoneRx}}","description":"Código da zona, ex.: A"}"""),
-                ("min_free", """{"type":"integer","minimum":1,"maximum":100000,"description":"Espaço livre mínimo"}"""))),
-        [ListInbound] = ("Pedidos de entrada (recebimento) do armazém, uma linha por item.",
-            ObjectSchema(("status", EnumSchema(InboundStatuses)))),
-        [ListOutbound] = ("Pedidos de saída (expedição) do armazém, uma linha por item.",
-            ObjectSchema(("status", EnumSchema(OutboundStatuses)))),
+        [SearchLocations] = (SearchLocationsDescription, SearchLocationsSchema),
+        [SearchZones] = (SearchZonesDescription, SearchZonesSchema),
+        [SearchLots] = (SearchLotsDescription, SearchLotsSchema),
+        [SearchOrders] = (SearchOrdersDescription, SearchOrdersSchema),
+        [SearchPartners] = (SearchPartnersDescription, SearchPartnersSchema),
     };
 
     private static readonly Dictionary<string, JsonSchema> Compiled =
@@ -92,9 +87,11 @@ internal static partial class PlannerTools
             GetProduct => $"Consultando o produto {Get("sku")}",
             GetStock when Get("sku") is { } sku => $"Consultando saldo do {sku}",
             GetStock => $"Consultando o endereço {Get("location")}",
-            FindLocation => "Procurando endereços livres",
-            ListInbound => "Consultando pedidos de entrada",
-            ListOutbound => "Consultando pedidos de saída",
+            SearchLocations => ArgText(args, "zone") is { } zone ? $"Pesquisando endereços da zona {zone.ToUpperInvariant()}" : SearchStatusFor("endereços", args),
+            SearchZones => SearchStatusFor("zonas", args),
+            SearchLots => SearchStatusFor("lotes", args),
+            SearchOrders => SearchStatusFor("pedidos", args),
+            SearchPartners => SearchStatusFor("fornecedores e clientes", args),
             _ => "Consultando",
         };
     }
@@ -127,11 +124,13 @@ internal static partial class PlannerTools
         }
         // Defense in depth: the strict regexes reject what the JSON Schema "$" would let through (trailing newline).
         foreach (var (key, rx) in new[] { ("sku", Sku()), ("location", Location()), ("zone", Zone()) })
-            if (tool != SearchProducts && parsed.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String && !rx.IsMatch(v.GetString()!))
+            if (tool is GetProduct or GetStock && parsed.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String && !rx.IsMatch(v.GetString()!))
                 bad.Add(key);
 
         if (tool == SearchProducts && results.IsValid)
             bad.UnionWith(InvalidSearchFields(parsed));
+        if (SharedSearchTools.Contains(tool) && results.IsValid)
+            bad.UnionWith(InvalidSharedFields(tool, parsed));
 
         if (tool == GetStock && !parsed.TryGetProperty("sku", out _) && !parsed.TryGetProperty("location", out _))
             return Error("invalid_arguments", "Informe sku, location ou os dois.");
@@ -149,8 +148,15 @@ internal static partial class PlannerTools
     /// <summary>Runs an already validated read tool.</summary>
     internal static ToolOutcome Execute(NexusDatabase database, string tool, JsonElement args, long warehouseId)
     {
-        if (tool == SearchProducts)
-            return ExecuteSearchProducts(database, args, warehouseId);
+        switch (tool)
+        {
+            case SearchProducts: return ExecuteSearchProducts(database, args, warehouseId);
+            case SearchLocations: return ExecuteSearchLocations(database, args, warehouseId);
+            case SearchZones: return ExecuteSearchZones(database, args, warehouseId);
+            case SearchLots: return ExecuteSearchLots(database, args, warehouseId);
+            case SearchOrders: return ExecuteSearchOrders(database, args, warehouseId);
+            case SearchPartners: return ExecuteSearchPartners(database, args);
+        }
 
         using var connection = database.OpenAiReadOnly();
         using var command = connection.CreateCommand();
@@ -172,28 +178,6 @@ internal static partial class PlannerTools
                     "ORDER BY sku, location_code, lot_code LIMIT $limit";
                 command.Parameters.AddWithValue("$sku", (object?)Get("sku") ?? DBNull.Value);
                 command.Parameters.AddWithValue("$location", (object?)Get("location") ?? DBNull.Value);
-                break;
-            case FindLocation:
-                command.CommandText =
-                    "SELECT l.code AS location_code, l.zone_code, l.capacity, " +
-                    "COALESCE((SELECT SUM(s.quantity) FROM v_ai_stock s WHERE s.warehouse_id = l.warehouse_id AND s.location_code = l.code), 0) AS occupied " +
-                    "FROM v_ai_locations l WHERE l.warehouse_id = $warehouse_id AND l.is_active = 1 " +
-                    "AND ($zone IS NULL OR l.zone_code = $zone) ORDER BY l.code";
-                command.Parameters.AddWithValue("$zone", (object?)Get("zone") ?? DBNull.Value);
-                break;
-            case ListInbound:
-                command.CommandText =
-                    "SELECT document_number, status, expected_on, supplier_name, sku, expected_qty, received_qty " +
-                    "FROM v_ai_inbound_orders WHERE warehouse_id = $warehouse_id AND ($status IS NULL OR status = $status) " +
-                    "ORDER BY expected_on, document_number, sku LIMIT $limit";
-                command.Parameters.AddWithValue("$status", (object?)Get("status") ?? DBNull.Value);
-                break;
-            case ListOutbound:
-                command.CommandText =
-                    "SELECT order_number, status, due_on, customer_name, sku, ordered_qty, picked_qty " +
-                    "FROM v_ai_outbound_orders WHERE warehouse_id = $warehouse_id AND ($status IS NULL OR status = $status) " +
-                    "ORDER BY due_on, order_number, sku LIMIT $limit";
-                command.Parameters.AddWithValue("$status", (object?)Get("status") ?? DBNull.Value);
                 break;
             default:
                 return Error("unknown_tool", "Ferramenta desconhecida.");
@@ -218,20 +202,6 @@ internal static partial class PlannerTools
             }
         }
 
-        if (tool == FindLocation)
-        {
-            var min = args.TryGetProperty("min_free", out var m) && m.TryGetInt64(out var mv) ? mv : 0;
-            var shaped = new List<JsonObject>();
-            foreach (var row in rows)
-            {
-                var capacity = row["capacity"]!.GetValue<long>();
-                var occupied = row["occupied"]!.GetValue<long>();
-                if (capacity - occupied < min) continue;
-                row["free"] = capacity - occupied;
-                shaped.Add(row);
-            }
-            rows = shaped;
-        }
         return Rows(rows);
     }
 
@@ -258,9 +228,6 @@ internal static partial class PlannerTools
     /// <summary>Compact JSON in which '&lt;' and '&gt;' are escaped, so data can never close the surrounding data block.</summary>
     internal static string Serialize(JsonNode node) =>
         node.ToJsonString(JsonOptions).Replace("<", "\\u003c", StringComparison.Ordinal).Replace(">", "\\u003e", StringComparison.Ordinal);
-
-    private static string EnumSchema(string[] values) =>
-        new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(values.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray()) }.ToJsonString();
 
     private static string ObjectSchema(params (string Name, string Schema)[] properties) =>
         ObjectSchema(properties, []);

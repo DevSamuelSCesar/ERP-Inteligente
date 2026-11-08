@@ -8,7 +8,7 @@ Escreva o que precisa em linguagem simples, com SKU, quantidade e local quando s
 ## O que o assistente faz
 - Consulta saldos, endereços, pedidos e procedimentos.
 - Prepara um plano e mostra o que vai mudar antes de executar.
-- Executa sozinho apenas operações reversíveis permitidas ao seu papel.
+- Executa operações reversíveis permitidas ao seu papel, só depois da sua confirmação. Operações críticas esperam outro supervisor.
 
 ## O que ele não faz
 - Não aprova operações críticas.

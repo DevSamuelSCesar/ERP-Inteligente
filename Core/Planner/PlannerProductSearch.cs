@@ -198,29 +198,7 @@ internal static partial class PlannerTools
                 });
             }
         }
-        return SearchPage(items, total, offset);
-    }
-
-    /// <summary>One page of results within <see cref="MaxResultBytes"/>; has_more tells the model to page with offset.</summary>
-    private static ToolOutcome SearchPage(List<JsonObject> items, long total, int offset)
-    {
-        while (true)
-        {
-            var node = new JsonObject
-            {
-                ["total"] = total,
-                ["offset"] = offset,
-                ["count"] = items.Count,
-                ["has_more"] = offset + items.Count < total,
-                ["items"] = new JsonArray(items.Select(r => (JsonNode?)r.DeepClone()).ToArray()),
-            };
-            if (total == 0)
-                node["hint"] = "Nenhum produto encontrado. Tente menos termos, parte do nome ou só o início do SKU.";
-            var text = Serialize(node);
-            if (Encoding.UTF8.GetByteCount(text) <= MaxResultBytes || items.Count == 0)
-                return new ToolOutcome(text, true, "ok");
-            items = items.Take(items.Count / 2).ToList();
-        }
+        return SearchPage(items, total, offset, "Nenhum produto encontrado. Tente menos termos, parte do nome ou só o início do SKU.");
     }
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..max] + "…";

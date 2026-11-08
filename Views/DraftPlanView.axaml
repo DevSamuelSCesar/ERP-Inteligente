@@ -26,7 +26,24 @@
             </Grid>
             <Rectangle Classes="rule" />
 
-            <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Margin="14,8,14,4">
+            <!-- Why this path and what was assumed (references/UI.md, section 5.1) -->
+            <ContentControl Content="{Binding Rationale}" Margin="14,10,14,0"
+                            IsVisible="{Binding Rationale, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <StackPanel Margin="14,10,14,0" Spacing="4" IsVisible="{Binding HasAssumptions}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <PathIcon Classes="info" Data="{StaticResource Icon.Info}" Width="14" Height="14" />
+                    <TextBlock Classes="label" Text="Suposições" VerticalAlignment="Center" />
+                </StackPanel>
+                <ItemsControl ItemsSource="{Binding Assumptions}" Margin="20,0,0,0">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </StackPanel>
+
+            <Grid Classes="stepLine" ColumnDefinitions="180,100,84,100,120,*" Margin="14,8,14,4">
                 <TextBlock Grid.Column="0" Classes="label" Text="Operação" />
                 <TextBlock Grid.Column="1" Classes="label" Text="Qtd" />
                 <TextBlock Grid.Column="2" Classes="label" Text="SKU" />
@@ -37,7 +54,7 @@
             <ItemsControl ItemsSource="{Binding Steps}" Margin="14,0,14,10">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:PlanStepLine">
-                        <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Height="26">
+                        <Grid Classes="stepLine" ColumnDefinitions="180,100,84,100,120,*" Height="26">
                             <TextBlock Grid.Column="0" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Column="1" Classes="tabular" Text="{Binding Quantity}" />
                             <TextBlock Grid.Column="2" Classes="tabular" Text="{Binding Sku}" />

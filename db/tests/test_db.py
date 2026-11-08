@@ -24,6 +24,14 @@ SENSITIVE_COLUMNS = {
 
 AI_ROLE_ID = 5
 
+MIGRATION_003 = DB_DIR / "migrations" / "003_full_catalog.sql"
+MIGRATION_004 = DB_DIR / "migrations" / "004_reservations.sql"
+V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
+# Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
+V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
+V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
+AI_DENY_PERMISSIONS = {"plan.approve", "sensitive.read", "user.manage", "role.manage", "audit.read", "recipe.manage"}
+
 # Base tables behind the v_ai_* views. SQLite reports a READ with an empty column name when a joined
 # table contributes no column (e.g. LEFT JOIN elimination); that exposes no data and is allowed only here.
 AI_VIEW_TABLES = {
@@ -211,13 +219,31 @@ class AuditChainTests(DatabaseTestCase):
 
 class PrivilegeEscalationTests(DatabaseTestCase):
     def test_ai_role_cannot_receive_forbidden_permissions(self):
-        for permission in ("plan.approve", "stock.adjust", "sensitive.read", "role.manage"):
+        for permission in ("plan.approve", "user.manage", "sensitive.read", "role.manage", "audit.read"):
             self.assertDenied(
                 "INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, ?, 'ALLOW')",
                 (AI_ROLE_ID, permission))
 
+    def test_ai_role_can_receive_operational_permissions(self):
+        # Decision of 2026-11-08: stock.adjust and stock.ship are no longer on the escalation list.
+        for permission in ("stock.adjust", "stock.ship"):
+            self.conn.execute(
+                "DELETE FROM role_permissions WHERE role_id = ? AND permission = ? AND effect = 'ALLOW'",
+                (AI_ROLE_ID, permission))
+            self.conn.execute(
+                "INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, ?, 'ALLOW')",
+                (AI_ROLE_ID, permission))
+            self.assertTrue(is_allowed(self.conn, AI_ROLE_ID, permission))
+
+    def test_ai_deny_rows_left_after_migration_are_exactly_the_restricted_ones(self):
+        denied = {r[0] for r in self.conn.execute(
+            "SELECT permission FROM role_permissions WHERE role_id = ? AND effect = 'DENY'", (AI_ROLE_ID,))}
+        self.assertEqual(denied, AI_DENY_PERMISSIONS)
+
     def test_ai_deny_rows_cannot_be_removed(self):
         self.assertDenied("DELETE FROM role_permissions WHERE role_id = ? AND effect = 'DENY'", (AI_ROLE_ID,))
+        self.assertDenied("DELETE FROM role_permissions WHERE role_id = ? AND permission = 'plan.approve' "
+                          "AND effect = 'DENY'", (AI_ROLE_ID,))
 
     def test_ai_cannot_approve_plans(self):
         self.assertDenied("UPDATE plans SET approved_by = 5 WHERE id = 2")
@@ -276,9 +302,25 @@ class PrivilegeEscalationTests(DatabaseTestCase):
     def test_ai_rights_are_intersection_with_requesting_user(self):
         operador, supervisor = 1, 2
         self.assertTrue(ai_is_allowed(self.conn, operador, "stock.move"))
+        self.assertTrue(ai_is_allowed(self.conn, operador, "order.manage"))
         self.assertFalse(ai_is_allowed(self.conn, operador, "catalog.manage"))
-        self.assertFalse(ai_is_allowed(self.conn, supervisor, "stock.adjust"))
+        # The AI holds stock.adjust, but an operador asking for it does not: the intersection is empty.
+        self.assertFalse(ai_is_allowed(self.conn, operador, "stock.adjust"))
+        self.assertFalse(ai_is_allowed(self.conn, operador, "stock.ship"))
+        # A supervisor asking for it: the AI and the supervisor both hold it.
+        self.assertTrue(ai_is_allowed(self.conn, supervisor, "stock.adjust"))
+        self.assertTrue(ai_is_allowed(self.conn, supervisor, "stock.ship"))
         self.assertFalse(ai_is_allowed(self.conn, supervisor, "plan.approve"))
+        self.assertFalse(ai_is_allowed(self.conn, supervisor, "user.manage"))
+
+    def test_order_manage_is_allowed_for_operador_supervisor_and_ai(self):
+        for role_id in (1, 2, 5):
+            self.assertTrue(is_allowed(self.conn, role_id, "order.manage"), role_id)
+
+    def test_ai_holds_location_and_stock_operations(self):
+        for permission in ("location.manage", "stock.adjust", "stock.ship"):
+            self.assertTrue(is_allowed(self.conn, AI_ROLE_ID, permission), permission)
+        self.assertFalse(is_allowed(self.conn, 1, "location.manage"))
 
 
 class AiConnectionTests(DatabaseTestCase):
@@ -303,6 +345,25 @@ class AiConnectionTests(DatabaseTestCase):
                     "SELECT unit_cost_enc FROM products",
                     "SELECT password_hash FROM v_users_masked JOIN users USING (id)",
                     "SELECT * FROM audit_log"):
+            with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                self.ai.execute(sql).fetchall()
+
+    def test_ai_reads_zones_lots_and_partners_through_views(self):
+        self.assertEqual(
+            self.ai.execute("SELECT code, is_active FROM v_ai_zones WHERE code = 'C'").fetchall(), [("C", 1)])
+        self.assertEqual(
+            self.ai.execute("SELECT sku, lot_code, expires_on FROM v_ai_lots WHERE lot_code = 'L200-2611'").fetchall(),
+            [("LIM-200", "L200-2611", "2026-11-30")])
+        self.assertEqual(
+            self.ai.execute("SELECT kind, name, is_active FROM v_ai_partners WHERE id = 2 ORDER BY kind").fetchall(),
+            [("customer", "Mercado Fictício Norte", 1), ("supplier", "Distribuidora Fictícia Beta S.A.", 1)])
+
+    def test_ai_cannot_read_partner_documents_or_contacts(self):
+        for sql in ("SELECT cnpj_enc FROM suppliers",
+                    "SELECT contact_email_enc FROM customers",
+                    "SELECT cnpj_masked FROM suppliers",
+                    "SELECT document_masked FROM customers",
+                    "SELECT kind, cnpj_masked FROM v_ai_partners JOIN suppliers USING (id)"):
             with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
                 self.ai.execute(sql).fetchall()
 
@@ -364,6 +425,211 @@ class OptimizationTests(DatabaseTestCase):
         self.assertNotIn("SCAN m", self.plan(kardex))
         self.assertIn("idx_lots_expires_on", self.plan(fefo))
         self.assertIn("idx_stock_balances_lot", self.plan(fefo))
+
+
+class MigrationTo3Tests(unittest.TestCase):
+    """A version 2 database upgraded by migrations/003 and 004 must match a fresh install (schema.sql + security.sql + seed.sql)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.paths = {"fresh": pathlib.Path(self.tmp) / "fresh.db", "migrated": pathlib.Path(self.tmp) / "migrated.db"}
+        self.fresh = sqlite3.connect(self.paths["fresh"])
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(self.paths["migrated"])
+        for name in V2_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_003.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+        shutil.rmtree(self.tmp)
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_permissions_match_fresh_install(self):
+        self.assertSameRows("SELECT role_id, permission, effect FROM role_permissions ORDER BY 1, 2, 3")
+        self.assertSameRows("SELECT role_id, permission FROM v_effective_permissions ORDER BY 1, 2")
+
+    def test_order_manage_and_ai_operational_rights_after_migration(self):
+        for conn in (self.fresh, self.migrated):
+            self.assertEqual(
+                conn.execute("SELECT role_id FROM v_effective_permissions WHERE permission = 'order.manage' "
+                             "ORDER BY role_id").fetchall(), [(1,), (2,), (5,)])
+            for permission in ("location.manage", "stock.adjust", "stock.ship"):
+                self.assertEqual(conn.execute("SELECT count(*) FROM v_effective_permissions "
+                                              "WHERE role_id = 5 AND permission = ?", (permission,)).fetchone(), (1,))
+
+    def test_views_and_triggers_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema WHERE type IN ('view', 'trigger') ORDER BY 1, 2")
+        for view in ("v_ai_zones", "v_ai_lots", "v_ai_partners"):
+            self.assertSameRows(f"SELECT name, type FROM pragma_table_info('{view}') ORDER BY cid")
+
+    def test_catalog_columns_match_fresh_install(self):
+        for table in ("zones", "suppliers", "customers"):
+            with self.subTest(table=table):
+                self.assertSameRows(
+                    f"SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table}') ORDER BY cid")
+
+    def test_active_flags_only_accept_0_and_1(self):
+        for table in ("zones", "suppliers", "customers"):
+            with self.subTest(table=table), self.assertRaises(sqlite3.IntegrityError):
+                self.migrated.execute(f"UPDATE {table} SET is_active = 2 WHERE id = 1")
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM zones WHERE is_active = 1").fetchone(), (4,))
+
+    def test_ai_restrictions_hold_after_migration(self):
+        for label, conn in (("fresh", self.fresh), ("migrated", self.migrated)):
+            with self.subTest(database=label):
+                denied = {r[0] for r in conn.execute(
+                    "SELECT permission FROM role_permissions WHERE role_id = 5 AND effect = 'DENY'")}
+                self.assertEqual(denied, AI_DENY_PERMISSIONS)
+                for permission in ("plan.approve", "sensitive.read", "role.manage", "user.manage", "audit.read"):
+                    with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+                        conn.execute("INSERT INTO role_permissions (role_id, permission, effect) "
+                                     "VALUES (5, ?, 'ALLOW')", (permission,))
+                with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+                    conn.execute("DELETE FROM role_permissions WHERE role_id = 5 AND permission = 'plan.approve' "
+                                 "AND effect = 'DENY'")
+                conn.rollback()
+
+    def test_ai_reads_new_views_through_the_authorizer(self):
+        self.migrated.rollback()  # nothing pending; the read-only AI connection below must see the committed schema
+        ai = sqlite3.connect(f"file:{self.paths['migrated']}?mode=ro", uri=True)
+        self.addCleanup(ai.close)
+        ai.set_authorizer(ai_authorizer)
+
+        self.assertEqual(ai.execute("SELECT count(*) FROM v_ai_zones").fetchone(), (4,))
+        self.assertEqual(ai.execute("SELECT count(*) FROM v_ai_lots").fetchone(), (6,))
+        self.assertEqual(ai.execute("SELECT count(*) FROM v_ai_partners").fetchone(), (6,))
+        for view in ("v_ai_zones", "v_ai_lots", "v_ai_partners"):
+            columns = {r[1] for r in self.migrated.execute(f"PRAGMA table_info({view})")}
+            self.assertFalse(columns & SENSITIVE_COLUMNS, view)
+        self.assertEqual({r[1] for r in self.migrated.execute("PRAGMA table_info(v_ai_partners)")},
+                         {"kind", "id", "name", "is_active"})
+        with self.assertRaises(sqlite3.DatabaseError):
+            ai.execute("SELECT cnpj_enc FROM suppliers").fetchall()
+
+
+class ReservationTests(unittest.TestCase):
+    """order_reservations: guarded transitions, immutable quantity, no delete, seed backfill."""
+
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        load_scripts(self.conn, BASE_SCRIPTS)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def new_row(self, line=3, balance=8, qty=3):
+        # line 3 = PED-FICT-5002 / product 7, balance 8 = product 7, lot 4 (holds 6 reserved of 16)
+        return self.conn.execute(
+            "INSERT INTO order_reservations (warehouse_id, outbound_order_line_id, balance_id, quantity) "
+            "VALUES (1, ?, ?, ?)", (line, balance, qty)).lastrowid
+
+    def test_seed_backfills_the_unambiguous_reserved_order(self):
+        rows = self.conn.execute(
+            "SELECT o.order_number, p.sku, r.quantity, r.state FROM order_reservations r "
+            "JOIN outbound_order_lines l ON l.id = r.outbound_order_line_id "
+            "JOIN outbound_orders o ON o.id = l.outbound_order_id JOIN products p ON p.id = l.product_id "
+            "ORDER BY p.sku").fetchall()
+        self.assertEqual(rows, [("PED-FICT-5001", "ABC-124", 10, "reserved"), ("PED-FICT-5001", "FER-010", 2, "reserved")])
+        # Reservations never exceed what the balances say is reserved.
+        self.assertEqual(self.conn.execute(
+            "SELECT count(*) FROM stock_balances b WHERE (SELECT COALESCE(SUM(quantity), 0) FROM order_reservations r "
+            "WHERE r.balance_id = b.id AND r.state IN ('reserved', 'picked')) > b.reserved_qty").fetchone(), (0,))
+
+    def test_quantity_must_be_positive_and_state_known(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.new_row(qty=0)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO order_reservations (warehouse_id, outbound_order_line_id, balance_id, quantity, state) "
+                              "VALUES (1, 3, 8, 1, 'lost')")
+
+    def test_rows_cannot_be_deleted(self):
+        rid = self.new_row()
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+            self.conn.execute("DELETE FROM order_reservations WHERE id = ?", (rid,))
+
+    def test_quantity_and_identity_are_immutable(self):
+        rid = self.new_row()
+        for column, value in (("quantity", 1), ("outbound_order_line_id", 4), ("warehouse_id", 2), ("created_plan_id", 1)):
+            with self.subTest(column=column), self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+                self.conn.execute(f"UPDATE order_reservations SET {column} = ? WHERE id = ?", (value, rid))
+
+    def test_legal_transitions(self):
+        rid = self.new_row()
+        for state in ("picked", "shipped"):
+            self.conn.execute("UPDATE order_reservations SET state = ? WHERE id = ?", (state, rid))
+        other = self.new_row(qty=1)
+        self.conn.execute("UPDATE order_reservations SET state = 'released' WHERE id = ?", (other,))
+        third = self.new_row(qty=2)
+        self.conn.execute("UPDATE order_reservations SET state = 'picked', balance_id = 9 WHERE id = ?", (third,))
+        self.conn.execute("UPDATE order_reservations SET state = 'released' WHERE id = ?", (third,))
+
+    def test_illegal_transitions_are_denied(self):
+        for start, target in (("reserved", "shipped"), ("picked", "reserved"), ("shipped", "released"),
+                              ("released", "reserved"), ("released", "picked"), ("shipped", "picked")):
+            with self.subTest(start=start, target=target):
+                rid = self.new_row()
+                path = {"reserved": [], "picked": ["picked"], "shipped": ["picked", "shipped"], "released": ["released"]}[start]
+                for step in path:
+                    self.conn.execute("UPDATE order_reservations SET state = ? WHERE id = ?", (step, rid))
+                with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+                    self.conn.execute("UPDATE order_reservations SET state = ? WHERE id = ?", (target, rid))
+
+    def test_balance_may_only_change_with_a_pick(self):
+        rid = self.new_row()
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+            self.conn.execute("UPDATE order_reservations SET balance_id = 9 WHERE id = ?", (rid,))
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "DENY"):
+            self.conn.execute("UPDATE order_reservations SET state = 'released', balance_id = 9 WHERE id = ?", (rid,))
+
+
+class MigrationTo4Tests(unittest.TestCase):
+    """A version 3 database upgraded by migrations/004 must match a fresh install."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        for name in V3_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+        self.assertSameRows(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('order_reservations') ORDER BY cid")
+
+    def test_backfill_matches_the_seed(self):
+        self.assertSameRows("SELECT warehouse_id, outbound_order_line_id, balance_id, quantity, state "
+                            "FROM order_reservations ORDER BY id")
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM order_reservations").fetchone(), (2,))
+
+    def test_ambiguous_orders_stay_legacy(self):
+        # A second reserved order for the same product makes the allocation ambiguous: no rows are invented.
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        for name in V3_SCRIPTS:
+            conn.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        conn.execute("INSERT INTO outbound_orders (warehouse_id, customer_id, order_number, status) "
+                     "VALUES (1, 1, 'PED-FICT-9', 'reserved')")
+        conn.execute("INSERT INTO outbound_order_lines (outbound_order_id, product_id, ordered_qty) "
+                     "VALUES (3, 2, 10)")
+        conn.executescript(MIGRATION_004.read_text(encoding="utf-8"))
+        self.assertEqual(conn.execute("SELECT count(*) FROM order_reservations").fetchone(), (0,))
+
+    def test_audit_log_is_untouched(self):
+        self.assertSameRows("SELECT id, hash FROM audit_log ORDER BY id")
 
 
 if __name__ == "__main__":

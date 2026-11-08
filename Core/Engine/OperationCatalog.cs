@@ -44,6 +44,21 @@ public static class OperationCatalog
             Define("adjust_stock", RiskLevel.Critical, "stock.adjust", PlanOperation.AdjustStock, "Ajuste de estoque", "sku", "location"),
             Define("create_product", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateProduct, "Cadastro de produto"),
             Define("create_location", RiskLevel.Reversible, "location.manage", PlanOperation.CreateLocation, "Cadastro de endereço"),
+            Define("create_zone", RiskLevel.Reversible, "location.manage", PlanOperation.CreateZone, "Cadastro de zona"),
+            Define("update_zone", RiskLevel.Reversible, "location.manage", PlanOperation.UpdateZone, "Alteração de zona", "code"),
+            Define("create_location_range", RiskLevel.Reversible, "location.manage", PlanOperation.CreateLocationRange, "Cadastro de endereços em lote", "zone"),
+            Define("update_location", RiskLevel.Reversible, "location.manage", PlanOperation.UpdateLocation, "Alteração de endereço", "code"),
+            Define("update_product", RiskLevel.Reversible, "catalog.manage", PlanOperation.UpdateProduct, "Alteração de produto", "sku"),
+            Define("create_supplier", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateSupplier, "Cadastro de fornecedor"),
+            Define("create_customer", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateCustomer, "Cadastro de cliente"),
+            Define("create_inbound_order", RiskLevel.Reversible, "order.manage", PlanOperation.CreateInboundOrder, "Pedido de entrada"),
+            Define("cancel_inbound_order", RiskLevel.Critical, "order.manage", PlanOperation.CancelInboundOrder, "Cancelamento de pedido de entrada"),
+            Define("create_outbound_order", RiskLevel.Reversible, "order.manage", PlanOperation.CreateOutboundOrder, "Pedido de saída"),
+            Define("reserve_stock", RiskLevel.Reversible, "stock.reserve", PlanOperation.ReserveStock, "Reserva de estoque", "order_number"),
+            Define("release_reservation", RiskLevel.Reversible, "stock.reserve", PlanOperation.ReleaseReservation, "Liberação de reserva", "order_number"),
+            Define("pick_items", RiskLevel.Reversible, "stock.pick", PlanOperation.PickItems, "Separação de pedido", "order_number", "to"),
+            Define("ship_order", RiskLevel.Critical, "stock.ship", PlanOperation.ShipOrder, "Expedição de pedido", "order_number"),
+            Define("cancel_outbound_order", RiskLevel.Critical, "order.manage", PlanOperation.CancelOutboundOrder, "Cancelamento de pedido de saída", "order_number"),
         };
         foreach (var op in list)
             ByName.Add(op.Name, op);

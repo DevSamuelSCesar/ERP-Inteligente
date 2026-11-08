@@ -23,7 +23,7 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     -- operador
     (1, 'stock.read', 'ALLOW'), (1, 'stock.receive', 'ALLOW'), (1, 'stock.move', 'ALLOW'),
     (1, 'stock.reserve', 'ALLOW'), (1, 'stock.pick', 'ALLOW'), (1, 'plan.submit', 'ALLOW'),
-    (1, 'memory.write', 'ALLOW'),
+    (1, 'memory.write', 'ALLOW'), (1, 'order.manage', 'ALLOW'),
     (1, 'stock.adjust', 'DENY'), (1, 'stock.ship', 'DENY'), (1, 'plan.approve', 'DENY'),
     (1, 'sensitive.read', 'DENY'), (1, 'user.manage', 'DENY'), (1, 'role.manage', 'DENY'),
     (1, 'audit.read', 'DENY'),
@@ -33,6 +33,7 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (2, 'stock.adjust', 'ALLOW'), (2, 'plan.submit', 'ALLOW'), (2, 'plan.approve', 'ALLOW'),
     (2, 'catalog.manage', 'ALLOW'), (2, 'location.manage', 'ALLOW'), (2, 'sensitive.read', 'ALLOW'),
     (2, 'memory.write', 'ALLOW'), (2, 'recipe.manage', 'ALLOW'), (2, 'audit.read', 'ALLOW'),
+    (2, 'order.manage', 'ALLOW'),
     (2, 'user.manage', 'DENY'), (2, 'role.manage', 'DENY'),
     -- administrador
     (3, 'stock.read', 'ALLOW'), (3, 'user.manage', 'ALLOW'), (3, 'role.manage', 'ALLOW'),
@@ -46,11 +47,12 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (4, 'stock.move', 'DENY'), (4, 'stock.adjust', 'DENY'), (4, 'stock.ship', 'DENY'),
     (4, 'sensitive.read', 'DENY'), (4, 'user.manage', 'DENY'), (4, 'role.manage', 'DENY'),
     (4, 'memory.write', 'DENY'),
-    -- agente_ia (effective rights = AI role ∩ requesting user's role)
+    -- agente_ia (effective rights = AI role ∩ requesting user's role; decision of 2026-11-08 in migrations/003)
     (5, 'stock.read', 'ALLOW'), (5, 'plan.submit', 'ALLOW'), (5, 'stock.receive', 'ALLOW'),
     (5, 'stock.move', 'ALLOW'), (5, 'stock.reserve', 'ALLOW'), (5, 'stock.pick', 'ALLOW'),
-    (5, 'catalog.manage', 'ALLOW'), (5, 'memory.write', 'ALLOW'),
-    (5, 'plan.approve', 'DENY'), (5, 'stock.adjust', 'DENY'), (5, 'stock.ship', 'DENY'),
+    (5, 'stock.adjust', 'ALLOW'), (5, 'stock.ship', 'ALLOW'), (5, 'location.manage', 'ALLOW'),
+    (5, 'order.manage', 'ALLOW'), (5, 'catalog.manage', 'ALLOW'), (5, 'memory.write', 'ALLOW'),
+    (5, 'plan.approve', 'DENY'),
     (5, 'sensitive.read', 'DENY'), (5, 'user.manage', 'DENY'), (5, 'role.manage', 'DENY'),
     (5, 'audit.read', 'DENY'), (5, 'recipe.manage', 'DENY');
 
@@ -165,6 +167,28 @@ INSERT INTO outbound_orders (id, warehouse_id, customer_id, order_number, status
 INSERT INTO outbound_order_lines (outbound_order_id, product_id, ordered_qty, picked_qty) VALUES
     (1, 2, 10, 0), (1, 3, 2, 0),
     (2, 7, 6, 0),  (2, 9, 4, 0);
+
+-- Backfill of reservations made before this table existed: an order in status 'reserved' (nothing picked) gets one
+-- 'reserved' row per balance holding reserved stock of its products, but ONLY when every line is unambiguous: the
+-- warehouse's reserved_qty for the line's product equals the line's ordered_qty and no other reserved/picking order
+-- of the warehouse has a line for that product. Any other order stays legacy (reserved_qty without rows); releasing
+-- or cancelling it then leaves that quantity reserved until someone corrects it. Audit rows are not touched.
+INSERT INTO order_reservations (warehouse_id, outbound_order_line_id, balance_id, quantity, state)
+SELECT o.warehouse_id, l.id, b.id, b.reserved_qty, 'reserved'
+FROM outbound_orders o
+JOIN outbound_order_lines l ON l.outbound_order_id = o.id
+JOIN stock_balances b ON b.product_id = l.product_id AND b.warehouse_id = o.warehouse_id AND b.reserved_qty > 0
+WHERE o.status = 'reserved'
+  AND NOT EXISTS (
+      SELECT 1 FROM outbound_order_lines l2
+      WHERE l2.outbound_order_id = o.id
+        AND NOT (l2.picked_qty = 0
+             AND (SELECT COALESCE(SUM(b2.reserved_qty), 0) FROM stock_balances b2
+                  WHERE b2.product_id = l2.product_id AND b2.warehouse_id = o.warehouse_id) = l2.ordered_qty
+             AND (SELECT COUNT(*) FROM outbound_order_lines l3
+                  JOIN outbound_orders o3 ON o3.id = l3.outbound_order_id
+                  WHERE l3.product_id = l2.product_id AND o3.warehouse_id = o.warehouse_id
+                    AND o3.status IN ('reserved', 'picking')) = 1));
 
 -- ---------------------------------------------------------------------------
 -- Recipes, plans, memories, audit

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_location_range",
+  "description": "Cadastra vários endereços de uma vez num corredor de uma zona, do nível inicial ao final. Os códigos seguem o formato ZONA-CORREDOR-NÍVEL (Q-01-01 a Q-01-05) e nenhum pode já existir.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["zone", "aisle", "level_from", "level_to", "capacity"],
+  "properties": {
+    "zone": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{1,4}$", "maxLength": 4 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "Código da zona (ativa) ou referência a um passo anterior." },
+    "aisle": { "type": "integer", "minimum": 1, "maximum": 99, "description": "Número do corredor (1 a 99)." },
+    "level_from": { "type": "integer", "minimum": 1, "maximum": 99, "description": "Primeiro nível a criar." },
+    "level_to": { "type": "integer", "minimum": 1, "maximum": 99, "description": "Último nível a criar (igual ou maior que o primeiro)." },
+    "capacity": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Capacidade, em unidades, de cada endereço criado." }
+  }
+}

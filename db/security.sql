@@ -23,6 +23,21 @@ CREATE TRIGGER stock_movements_deny_delete BEFORE DELETE ON stock_movements BEGI
     SELECT RAISE(ABORT, 'DENY: stock_movements is append-only; use a compensating movement');
 END;
 
+CREATE TRIGGER order_reservations_deny_delete BEFORE DELETE ON order_reservations BEGIN
+    SELECT RAISE(ABORT, 'DENY: order_reservations is append-only; release it instead');
+END;
+
+-- Only state, updated_plan_id and (when a pick moves the stock to a dock) balance_id may change, and only along
+-- reserved -> picked -> shipped, or reserved/picked -> released. Released and shipped rows are final.
+CREATE TRIGGER order_reservations_guard_update BEFORE UPDATE ON order_reservations
+WHEN new.id <> old.id OR new.warehouse_id <> old.warehouse_id OR new.outbound_order_line_id <> old.outbound_order_line_id
+  OR new.quantity <> old.quantity OR new.created_plan_id IS NOT old.created_plan_id OR new.created_at <> old.created_at
+  OR (new.balance_id <> old.balance_id AND NOT (old.state = 'reserved' AND new.state = 'picked'))
+  OR NOT ((old.state = 'reserved' AND new.state IN ('reserved', 'picked', 'released'))
+       OR (old.state = 'picked'   AND new.state IN ('picked', 'shipped', 'released'))) BEGIN
+    SELECT RAISE(ABORT, 'DENY: illegal reservation change');
+END;
+
 CREATE TRIGGER plans_deny_update_final BEFORE UPDATE ON plans
 WHEN old.status IN ('executed', 'failed', 'rejected') BEGIN
     SELECT RAISE(ABORT, 'DENY: finished plans are immutable');
@@ -36,12 +51,13 @@ END;
 -- Privilege escalation guards for the AI role
 -- ---------------------------------------------------------------------------
 
--- Permissions the AI role can never receive, whoever runs the INSERT.
+-- Permissions the AI role can never receive, whoever runs the INSERT. stock.adjust and stock.ship are not
+-- here: since 2026-11-08 the AI has the operational rights of the user (migrations/003_full_catalog.sql).
 CREATE TRIGGER role_permissions_deny_ai_escalation BEFORE INSERT ON role_permissions
 WHEN new.effect = 'ALLOW'
  AND (SELECT is_ai FROM roles WHERE id = new.role_id) = 1
- AND new.permission IN ('plan.approve', 'stock.adjust', 'stock.ship', 'user.manage',
-                        'role.manage', 'sensitive.read', 'audit.read') BEGIN
+ AND new.permission IN ('plan.approve', 'user.manage', 'role.manage', 'sensitive.read',
+                        'audit.read') BEGIN
     SELECT RAISE(ABORT, 'DENY: permission cannot be granted to the AI role');
 END;
 
@@ -150,6 +166,21 @@ CREATE VIEW v_ai_recipes AS
 SELECT id, name, description, intent, params_schema_json, status
 FROM recipes
 WHERE status = 'active';
+
+CREATE VIEW v_ai_zones AS
+SELECT id, warehouse_id, code, name, is_active
+FROM zones;
+
+CREATE VIEW v_ai_lots AS
+SELECT p.sku, l.lot_code, l.expires_on
+FROM lots l
+JOIN products p ON p.id = l.product_id;
+
+-- Suppliers and customers without their document, address or contact columns.
+CREATE VIEW v_ai_partners AS
+SELECT 'supplier' AS kind, id, name, is_active FROM suppliers
+UNION ALL
+SELECT 'customer', id, name, is_active FROM customers;
 
 -- ---------------------------------------------------------------------------
 -- Masked views for human roles without sensitive.read

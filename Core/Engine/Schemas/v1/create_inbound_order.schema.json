@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_inbound_order",
+  "description": "Cria um pedido de entrada (compra a receber) de um fornecedor, com situação 'esperado'. O número do documento não pode repetir outro pedido de entrada deste armazém. Depois, use receive_goods com o campo inbound_order para dar entrada nas mercadorias. Devolve o número do documento.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["supplier", "document_number", "lines"],
+  "properties": {
+    "supplier": { "type": "string", "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "minLength": 1, "maxLength": 120, "description": "Nome exato de um fornecedor ativo (maiúsculas e minúsculas não importam)." },
+    "document_number": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9-]{2,29}$", "maxLength": 30, "description": "Número do documento (por exemplo, a nota fiscal): 3 a 30 caracteres, letras maiúsculas, dígitos e hífen." },
+    "expected_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10, "description": "Data prevista de chegada, no formato AAAA-MM-DD." },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "description": "Itens esperados, de 1 a 50 linhas, sem repetir o SKU.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sku", "qty"],
+        "properties": {
+          "sku": { "type": "string", "pattern": "^[A-Z]{3}-[0-9]{3}$", "maxLength": 7, "description": "SKU de um produto cadastrado (ABC-123)." },
+          "qty": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Quantidade esperada." }
+        }
+      }
+    }
+  }
+}

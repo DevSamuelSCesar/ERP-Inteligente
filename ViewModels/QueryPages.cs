@@ -67,6 +67,41 @@ public sealed class LocationsViewModel(IQueryService queries) : QueryPageViewMod
     }
 }
 
+public sealed class ZonesViewModel(IQueryService queries) : QueryPageViewModel<ZoneRow>
+{
+    public override string Title => "Zonas";
+    public override string FilterPlaceholder => "Filtrar por código ou nome";
+
+    protected override Task<IReadOnlyList<ZoneRow>> LoadAsync() => queries.GetZonesAsync();
+
+    protected override IEnumerable<string> SearchableText(ZoneRow row) => [row.Code, row.Name, row.StatusText];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<ZoneRow> rows)
+    {
+        yield return new("Zonas", rows.Count.ToString());
+        yield return new("Ativas", rows.Count(r => r.IsActive).ToString());
+        yield return new("Endereços", rows.Sum(r => r.Locations).ToString("N0"));
+        yield return new("Espaço livre", rows.Sum(r => r.Free).ToString("N0"));
+    }
+}
+
+public sealed class PartnersViewModel(IQueryService queries) : QueryPageViewModel<PartnerRow>
+{
+    public override string Title => "Parceiros";
+    public override string FilterPlaceholder => "Filtrar por nome, tipo ou documento";
+
+    protected override Task<IReadOnlyList<PartnerRow>> LoadAsync() => queries.GetPartnersAsync();
+
+    protected override IEnumerable<string> SearchableText(PartnerRow row) => [row.Name, row.Kind, row.Document];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<PartnerRow> rows)
+    {
+        yield return new("Fornecedores", rows.Count(r => r.Kind == "Fornecedor").ToString());
+        yield return new("Clientes", rows.Count(r => r.Kind == "Cliente").ToString());
+        yield return new("Desativados", rows.Count(r => !r.IsActive).ToString());
+    }
+}
+
 public sealed class OrdersViewModel(IQueryService queries) : QueryPageViewModel<OrderRow>
 {
     public override string Title => "Pedidos";

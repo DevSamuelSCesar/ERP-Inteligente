@@ -102,6 +102,29 @@ O Nexus é onde o operador interage com o sistema: pede em linguagem natural, ac
 - Durante uma tarefa, a linha de estado tem o botão **Cancelar** (Esc), que interrompe a chamada ao provedor; nada foi gravado nesse ponto.
 - O texto da transcrição pode ser selecionado e copiado (`SelectableTextBlock`).
 
+### 4.2 Destaques nas respostas
+
+As respostas continuam em texto simples, mas as entidades do armazém ganham destaque para chamar a atenção. O reconhecimento é determinístico (`ViewModels/NexusText.cs`): padrões e nomes do catálogo. Nunca vem de marcação escrita pelo modelo, e Markdown continua sem ser interpretado.
+
+| Entidade | Exemplo | Destaque |
+|----------|---------|----------|
+| SKU | `ABC-123` | `Data2` (teal), Barlow Semi Condensed SemiBold |
+| Endereço | `A-02-01`, `DOCA-01` | `Data1` (azul-aço), tabular forte |
+| Zona | "zona **Q**" | `Data3` (violeta), tabular forte |
+| Pedido | `PED-FICT-5001`, `NF-FICT-000102` | `Data4` (areia), tabular forte |
+| Produto | "Caixa de parafusos 4mm" | `TextPrimary` em SemiBold |
+| Quantidade e plano | "40 cx", "plano 12" | `TextPrimary`, tabular forte |
+
+- As cores vêm da **paleta de dados**. O vermelho da marca e as cores de estado (sucesso, alerta, erro) nunca são usados como destaque, para não sugerir erro ou alerta onde não há.
+- Todas passam de 4,5:1 como texto (seção 9.5), e o destaque nunca é a única pista: o código continua legível em si.
+
+### 4.3 Opções clicáveis
+
+Quando há escolhas ou próximos passos úteis, o Nexus oferece de 1 a 4 **opções** logo abaixo da resposta (ex.: "Criar a zona Q", "Usar B-01-02").
+- São botões neutros com seta, nunca vermelhos.
+- Clicar numa opção envia o pedido dela como se o operador o tivesse digitado. Depois disso, a linha de opções fica só para leitura.
+- Os textos vêm do modelo, então são tratados como dados: são cortados no tamanho máximo e caracteres de controle são removidos.
+
 ### 4.1 Estados de uma tarefa
 
 Cada pedido gera uma tarefa que aparece na conversa com o seu estado atual. Os estados seguem os status de plano de [`ARQUITETURA.md`](ARQUITETURA.md) (seções 4 e 11):
@@ -154,11 +177,24 @@ Depois que a IA planeja e o Simulator calcula o efeito, o Nexus mostra o **quadr
 
 O plano montado pela IA chega primeiro como **proposta**: o motor já o validou e simulou, mas nada foi gravado.
 
-- O quadro é o mesmo da seção 5, com o título "Proposta do Nexus · skill", as linhas do plano e o **efeito simulado** (os mesmos visuais do resumo da seção 6).
+- O quadro é o mesmo da seção 5, com o título "Proposta do Nexus · título" ou, havendo alternativas, "Opção 1 de 3 · título". Ele mostra as linhas do plano e o **efeito simulado** (os mesmos visuais do resumo da seção 6).
+- **Por quê:** abaixo do título vem a justificativa curta da IA, com os destaques da seção 4.2.
+- **Suposições:** os valores que o pedido não trazia e a IA assumiu (próximo código livre, capacidade típica da zona, lote, unidade). Aparecem com o ícone de informação (`StatusInfo`) e os valores destacados, para o operador conferir antes de confirmar.
+- **Alternativas:** a IA pode propor até 3 caminhos. Confirmar um descarta os outros ("Outra opção foi escolhida. Nada foi gravado desta."), e o campo de pedido só volta quando todas as propostas foram decididas.
 - O rodapé pergunta "Confirmar?" com **✓ Confirmar** (Alt+C, `StatusSuccess`) e **Descartar** (Alt+D, contorno neutro, nunca vermelho).
 - **Confirmar** envia o plano ao motor com origem `ai` (direitos IA ∩ usuário). Um plano reversível executa e aparece o quadro do plano com o resumo. Um plano crítico vai para a aprovação de um supervisor (seção 5).
 - **Descartar** encerra a proposta só para leitura, com "Descartado. Nada foi gravado."
 - Configurar o provedor é feito em Configurações, seção "Provedor de LLM": só o administrador digita a chave (campo mascarado, nunca reexibida) e escolhe o modelo; os demais veem só se há chave.
+
+### 5.2 Novo plano (formulários gerados do catálogo)
+
+- Toda operação do catálogo tem formulário. Ele é gerado a partir do JSON Schema da operação (`ViewModels/PlanForms.cs`), então o que a IA pode propor o operador também faz à mão.
+- **Listas de escolha:** campos de código trazem os valores existentes para escolher, com filtro por trecho (SKU, endereço, zona, unidade, fornecedor, cliente, pedido). Digitar outro valor continua possível, porque o motor valida tudo.
+- **Preenchimento automático:** ao escolher a zona, o formulário completa só os campos vazios:
+  - cadastro de endereço: o próximo código livre;
+  - endereços em lote: o próximo corredor livre e os níveis 1 a 5;
+  - nos dois casos, a capacidade mais comum da zona.
+- **Itens de pedido:** os itens são digitados um por linha, como "ABC-123 10".
 
 ---
 
@@ -190,7 +226,7 @@ As visualizações usam só a paleta de dados (`Data1`–`Data5`, seção 9.4). 
 
 ## 7. Telas de consulta
 
-Estoque, Produtos, Endereços, Pedidos, Planos, Receitas e Auditoria seguem a mesma estrutura dentro do container (referência TOTVS, só estrutura):
+Estoque, Produtos, Zonas, Endereços, Pedidos, Parceiros, Planos, Receitas e Auditoria seguem a mesma estrutura dentro do container (referência TOTVS, só estrutura):
 
 ```
 Título da tela
@@ -316,6 +352,7 @@ Mínimos: **4,5:1** para texto (meta **7:1** no texto principal) e **3:1** para 
 | `StatusSuccess` / `StatusWarning` / `StatusError` / `StatusInfo` sobre `Surface` | 8,82 / 8,10 / 5,92 / 5,82 | 4,5 |
 | `OnStatus` sobre `StatusSuccess` / `StatusWarning` | 10,22 / 9,40 | 4,5 |
 | `Data1`–`Data5` sobre `Surface` | 6,49 / 6,36 / 5,95 / 7,21 / 5,14 | 3 |
+| `Data1`–`Data4` como **texto** destacado sobre `Background` / `Surface` (seção 4.2) | 7,52 / 7,38 / 6,90 / 8,36 e 6,49 / 6,36 / 5,95 / 7,21 | 4,5 |
 
 `BrandPrimary` sobre `Surface` dá só 2,81:1, por isso o **anel de foco usa `BrandAccent`**, nunca `BrandPrimary`. O vermelho da marca também nunca é usado como cor de texto.
 

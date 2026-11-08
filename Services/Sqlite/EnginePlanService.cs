@@ -266,10 +266,110 @@ public sealed class EnginePlanService(PlanEngine engine, ApplicationDb db, ISess
                     || ReadInt(args, "capacity") is not { } capacity) return null;
                 return new PlanStep(PlanOperation.CreateLocation, capacity, string.Empty, string.Empty, zone, code);
 
+            case "create_zone":
+                if (ReadString(args, "code") is not { } zCode || ReadString(args, "name") is not { } zName) return null;
+                return new PlanStep(PlanOperation.CreateZone, 0, string.Empty, string.Empty, zCode, null, zName);
+
+            case "update_zone":
+                if (ReadString(args, "code") is not { } uzCode) return null;
+                var zoneChanges = new List<string>();
+                if (ReadString(args, "name") is { } newZoneName) zoneChanges.Add($"novo nome: {newZoneName}");
+                if (ReadBool(args, "is_active") is { } zoneActive) zoneChanges.Add(zoneActive ? "ativar" : "desativar");
+                return new PlanStep(PlanOperation.UpdateZone, 0, string.Empty, string.Empty, uzCode, null, string.Join("; ", zoneChanges));
+
+            case "create_location_range":
+                if (ReadString(args, "zone") is not { } rZone || ReadInt(args, "aisle") is not { } aisle
+                    || ReadInt(args, "level_from") is not { } levelFrom || ReadInt(args, "level_to") is not { } levelTo
+                    || ReadInt(args, "capacity") is not { } rCapacity) return null;
+                var prefix = rZone.StartsWith('$') ? "zona do passo anterior" : rZone;
+                var range = rZone.StartsWith('$') ? $"corredor {aisle:00}, níveis {levelFrom:00} a {levelTo:00}"
+                    : $"{rZone}-{aisle:00}-{levelFrom:00} a {rZone}-{aisle:00}-{levelTo:00}";
+                return new PlanStep(PlanOperation.CreateLocationRange, rCapacity, string.Empty, string.Empty, prefix, range);
+
+            case "update_location":
+                if (ReadString(args, "code") is not { } ulCode) return null;
+                var locationChanges = new List<string>();
+                if (ReadInt(args, "capacity") is { } newCapacity) locationChanges.Add($"capacidade {newCapacity}");
+                if (ReadBool(args, "is_active") is { } locationActive) locationChanges.Add(locationActive ? "ativar" : "desativar");
+                return new PlanStep(PlanOperation.UpdateLocation, 0, string.Empty, string.Empty, ulCode, null, string.Join("; ", locationChanges));
+
+            case "update_product":
+                if (ReadString(args, "sku") is not { } upSku) return null;
+                var fields = new List<string>();
+                foreach (var (field, label) in ProductFieldLabels)
+                    if (args.ContainsKey(field)) fields.Add(label);
+                return new PlanStep(PlanOperation.UpdateProduct, 0, string.Empty, upSku, null, null, string.Join(", ", fields));
+
+            case "create_supplier":
+            case "create_customer":
+                if (ReadString(args, "name") is not { } partnerName) return null;
+                return new PlanStep(op == "create_supplier" ? PlanOperation.CreateSupplier : PlanOperation.CreateCustomer,
+                    0, string.Empty, string.Empty, null, ReadString(args, "document_masked"), partnerName);
+
+            case "create_inbound_order":
+                if (ReadString(args, "supplier") is not { } ibSupplier || ReadString(args, "document_number") is not { } ibDocument
+                    || args["lines"] is not JsonArray ibLines) return null;
+                var ibDue = ReadString(args, "expected_on");
+                return new PlanStep(PlanOperation.CreateInboundOrder, ibLines.Count, string.Empty, string.Empty, ibSupplier, ibDocument,
+                    ibDue is null ? null : $"previsto para {ibDue}");
+
+            case "cancel_inbound_order":
+                if (ReadString(args, "document_number") is not { } cbDocument || ReadString(args, "reason") is not { } cbReason) return null;
+                return new PlanStep(PlanOperation.CancelInboundOrder, 0, string.Empty, string.Empty, cbDocument, null, cbReason);
+
+            case "create_outbound_order":
+                if (ReadString(args, "customer") is not { } obCustomer || ReadString(args, "order_number") is not { } obNumber
+                    || args["lines"] is not JsonArray obLines) return null;
+                var obDue = ReadString(args, "due_on");
+                return new PlanStep(PlanOperation.CreateOutboundOrder, obLines.Count, string.Empty, string.Empty, obCustomer, obNumber,
+                    obDue is null ? null : $"entrega até {obDue}");
+
+            case "reserve_stock":
+            case "release_reservation":
+            case "pick_items":
+            case "ship_order":
+            case "cancel_outbound_order":
+                return MapOrderStep(op, args);
+
             default:
                 return null;
         }
     }
+
+    private static PlanStep? MapOrderStep(string op, JsonObject args)
+    {
+        if (ReadString(args, "order_number") is not { } number) return null;
+        var order = number.StartsWith('$') ? "pedido do passo anterior" : number;
+        var lines = args["lines"] as JsonArray;
+        var scope = lines is null ? "todas as linhas" : lines.Count == 1 ? "1 linha" : $"{lines.Count} linhas";
+        switch (op)
+        {
+            case "reserve_stock":
+                return new PlanStep(PlanOperation.ReserveStock, lines?.Count ?? 0, string.Empty, string.Empty, order, null, scope);
+            case "release_reservation":
+                return new PlanStep(PlanOperation.ReleaseReservation, lines?.Count ?? 0, string.Empty, string.Empty, order, null, scope);
+            case "pick_items":
+                return ReadString(args, "to") is { } dock
+                    ? new PlanStep(PlanOperation.PickItems, lines?.Count ?? 0, string.Empty, string.Empty, order, dock, scope)
+                    : null;
+            case "ship_order":
+                return new PlanStep(PlanOperation.ShipOrder, 0, string.Empty, string.Empty, order, null);
+            default:
+                return ReadString(args, "reason") is { } reason
+                    ? new PlanStep(PlanOperation.CancelOutboundOrder, 0, string.Empty, string.Empty, order, null, reason)
+                    : null;
+        }
+    }
+
+    // Product fields shown in the business-language line of update_product (the unit cost is named, never its value).
+    private static readonly (string Field, string Label)[] ProductFieldLabels =
+    [
+        ("name", "nome"), ("description", "descrição"), ("unit", "unidade"), ("weight_kg", "peso"),
+        ("tracks_expiry", "controle de validade"), ("unit_cost", "custo unitário"),
+    ];
+
+    private static bool? ReadBool(JsonObject args, string name) =>
+        args[name] is JsonValue value && value.TryGetValue<bool>(out var flag) ? flag : null;
 
     private static string? ReadString(JsonObject args, string name) =>
         args[name] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text) ? text : null;

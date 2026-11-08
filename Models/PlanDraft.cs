@@ -59,7 +59,7 @@ public sealed class PlanDraft
         {
             var args = new JsonObject();
             foreach (var (name, value) in step.Args)
-                args[name] = value is null ? null : JsonValue.Create(value);
+                args[name] = value is null ? null : JsonSerializer.SerializeToNode(value);
             var node = new JsonObject { ["op"] = step.Op, ["args"] = args };
             if (step.As is not null)
                 node["as"] = step.As;

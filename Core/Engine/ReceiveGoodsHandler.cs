@@ -66,7 +66,7 @@ internal sealed class ReceiveGoodsHandler : IOperationHandler
         var location = FindLocation(ctx, locCode);
         if (location is null)
         {
-            errors.Add(Error(step, "location", "business.unknown_location", UnknownLocation(locCode)));
+            errors.Add(Error(step, "location", "business.unknown_location", UnknownLocation(ctx, locCode)));
             return null;
         }
         var qty = Int(args, "qty") ?? 0;

@@ -35,6 +35,25 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
         ORDER BY p.sku
         """;
 
+    private const string ZonesSql = """
+        SELECT z.code, z.name, z.is_active,
+               (SELECT COUNT(*) FROM locations l WHERE l.zone_id = z.id) AS locations,
+               (SELECT COALESCE(SUM(l.capacity), 0) FROM locations l WHERE l.zone_id = z.id) AS capacity,
+               (SELECT COALESCE(SUM(b.quantity), 0) FROM stock_balances b JOIN locations l ON l.id = b.location_id
+                WHERE l.zone_id = z.id AND b.warehouse_id = $warehouse_id) AS occupied
+        FROM zones z
+        WHERE z.warehouse_id = $warehouse_id
+        ORDER BY z.code
+        """;
+
+    // Partners are global; contact and full document columns (*_enc) are never selected.
+    private const string PartnersSql = """
+        SELECT 'Fornecedor', name, COALESCE(cnpj_masked, ''), is_active FROM suppliers
+        UNION ALL
+        SELECT 'Cliente', name, COALESCE(document_masked, ''), is_active FROM customers
+        ORDER BY 1 DESC, 2
+        """;
+
     private const string LocationsSql = """
         SELECT l.code, z.name, l.capacity,
                (SELECT COALESCE(SUM(b.quantity), 0) FROM stock_balances b
@@ -87,6 +106,14 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
 
     public Task<IReadOnlyList<LocationRow>> GetLocationsAsync() =>
         db.QueryScopedAsync(session.Current, Permissions.StockRead, LocationsSql, ReadLocation);
+
+    public Task<IReadOnlyList<ZoneRow>> GetZonesAsync() =>
+        db.QueryScopedAsync(session.Current, Permissions.StockRead, ZonesSql, r => new ZoneRow(
+            r.GetString(0), r.GetString(1), r.GetInt64(2) == 1, r.GetInt32(3), r.GetInt32(4), r.GetInt32(5)));
+
+    public Task<IReadOnlyList<PartnerRow>> GetPartnersAsync() =>
+        db.QueryGlobalAsync(session.Current, Permissions.StockRead, PartnersSql, r => new PartnerRow(
+            r.GetString(0), r.GetString(1), r.GetString(2), r.GetInt64(3) == 1));
 
     public Task<IReadOnlyList<OrderRow>> GetOrdersAsync() =>
         db.QueryScopedAsync(session.Current, Permissions.StockRead, OrdersSql, ReadOrder);

@@ -28,8 +28,18 @@
                         <DataTemplate x:DataType="vm:PlanFieldViewModel">
                             <StackPanel Margin="0,0,0,12">
                                 <TextBlock Classes="label" Text="{Binding Label}" Margin="0,0,0,4" IsVisible="{Binding IsText}" />
+                                <TextBlock Classes="label" Text="{Binding Label}" Margin="0,0,0,4" IsVisible="{Binding HasSuggestions}" />
+                                <TextBlock Classes="label" Text="{Binding Label}" Margin="0,0,0,4" IsVisible="{Binding IsLines}" />
                                 <TextBox Text="{Binding Value}" PlaceholderText="{Binding Hint}" MaxLength="200"
                                          IsVisible="{Binding IsText}" />
+                                <!-- Pick-list of existing values; anything else can still be typed -->
+                                <AutoCompleteBox Text="{Binding Value}" ItemsSource="{Binding Suggestions}"
+                                                 PlaceholderText="{Binding Hint}" MaxLength="200" MinimumPrefixLength="0"
+                                                 FilterMode="ContainsOrdinal" MaxDropDownHeight="240"
+                                                 IsVisible="{Binding HasSuggestions}" />
+                                <TextBox Text="{Binding Value}" PlaceholderText="{Binding Hint}" MaxLength="2000"
+                                         AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxHeight="160"
+                                         IsVisible="{Binding IsLines}" />
                                 <CheckBox Content="{Binding Label}" IsChecked="{Binding Checked}" IsVisible="{Binding IsFlag}" />
                             </StackPanel>
                         </DataTemplate>

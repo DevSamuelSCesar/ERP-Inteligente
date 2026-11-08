@@ -29,6 +29,7 @@ public static class PlanDiffJson
             ["created"] = Array(diff.Created, c => new JsonObject { ["kind"] = c.Kind, ["code"] = c.Code, ["description"] = c.Description }),
             ["receipts"] = Array(diff.Receipts, Quantity),
             ["adjustments"] = Array(diff.Adjustments, Quantity),
+            ["updated"] = Array(diff.Updated, u => new JsonObject { ["kind"] = u.Kind, ["code"] = u.Code, ["description"] = u.Description }),
         };
         return root.ToJsonString();
     }
@@ -50,7 +51,9 @@ public static class PlanDiffJson
                 Read(root, "created", n => new CreatedRecord(
                     n["kind"]!.GetValue<string>(), n["code"]!.GetValue<string>(), n["description"]!.GetValue<string>())),
                 Read(root, "receipts", ReadQuantity),
-                Read(root, "adjustments", ReadQuantity));
+                Read(root, "adjustments", ReadQuantity),
+                Read(root, "updated", n => new UpdatedRecord(
+                    n["kind"]!.GetValue<string>(), n["code"]!.GetValue<string>(), n["description"]!.GetValue<string>())));
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or NullReferenceException)
         {

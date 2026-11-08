@@ -22,17 +22,18 @@ DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (di
 ## Camada de IA
 
 ### 3. Planner com tool calling ✅
-`ILlmProvider` com o primeiro adaptador, ferramentas de leitura sobre as views `v_ai_*`, `submit_plan` com devolução de erros estruturados e limite de tentativas, e tela de chat com prévia do plano e confirmação.
+`ILlmProvider` com o primeiro adaptador, ferramentas de leitura sobre as views `v_ai_*`, `propose_plan` com devolução de erros estruturados e limite de tentativas, e tela de chat com prévia do plano e confirmação.
 *Por que junto:* o Planner só tem valor com as ferramentas de leitura e a tela de chat que o alimentam e exibem seu resultado.
-*Estado:* pronto, só com a **DeepSeek**. Claude e OpenAI ficam para a feature 8.
+*Estado:* pronto, só com a **DeepSeek**. Claude e OpenAI ficam para a feature 8. Redesenhado em 2026-11-08 para o modo proativo: 8 ferramentas de leitura e pesquisa, `propose_plan` com até 3 alternativas, `offer_options` com botões de próximo passo, e formulários do Novo plano gerados do catálogo.
 - Código em `Core/Llm` (provedor, chave no cofre do SO) e `Core/Planner` (laço de ferramentas, prompt de sistema).
 - A chave é digitada pelo administrador em Configurações.
 - O plano da IA volta como proposta: só é gravado quando quem pediu confirma.
 - O motor aplica os direitos IA ∩ usuário a todo plano da IA.
 
-### 4. Skills e catálogo completo de operações
-Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`, junto com as operações `reserve_stock`, `pick_items` e `ship_order` (`adjust_stock` já entrou na feature 2).
+### 4. Skills
+Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`.
 *Por que junto:* cada skill depende das operações que ela permite.
+*Estado:* parcial. O catálogo completo de operações já está pronto (20 operações, incluindo `reserve_stock`, `pick_items`, `ship_order` e os cancelamentos), antecipado para 2026-11-08. Falta o carregador de skills e as skills.
 
 ### 5. Memória e RAG
 Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.
@@ -58,7 +59,7 @@ Backup criptografado pela API do SQLite, job de manutenção de memórias, paine
 ## Resumo
 
 ```
-1 Núcleo + acesso → 2 Motor de planos → 3 Planner + chat → 4 Skills + operações
+1 Núcleo + acesso → 2 Motor de planos → 3 Planner + chat → 4 Skills
    → 5 Memória + RAG → 6 Defesas e ataques → 7 Receitas → 8 Multi-provedor + fine-tuning → 9 Operação
 ```
 

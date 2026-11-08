@@ -92,7 +92,7 @@ flowchart TB
     PL --> HYB --> AIDATA
     CHK --> EMB --> AIDATA
     EMB <--> OAI
-    PL -- "submit_plan" --> VAL
+    PL -- "propose_plan" --> VAL
     VAL -- "erro estruturado" --> PL
     VAL --> SIM
     SIM -- "crítico" --> PREV --> APRV --> EXE
@@ -312,28 +312,33 @@ classDiagram
 
     class Planner {
         +RunAsync(UserSession user, PlannerTurn[] history, string request) Task~PlannerResult~
+        +propose_plan()
+        +offer_options()
     }
     class PlannerResult {
         <<abstract>>
     }
     class PlannerAnswer
-    class PlannerProposal {
-        +PlanDraft Draft
-        +EnginePreview Preview
+    class PlannerProposals {
+        +ProposalItem[] Items
+        +string? Text
+        +PlannerOption[] Options
     }
     class PlannerEscalated
     class PlannerFailed
     PlannerResult <|-- PlannerAnswer
-    PlannerResult <|-- PlannerProposal
+    PlannerResult <|-- PlannerProposals
     PlannerResult <|-- PlannerEscalated
     PlannerResult <|-- PlannerFailed
     class PlannerTools {
         +search_products()
         +get_product()
         +get_stock()
-        +find_location()
-        +list_inbound_orders()
-        +list_outbound_orders()
+        +search_locations()
+        +search_zones()
+        +search_lots()
+        +search_orders()
+        +search_partners()
     }
     class AiReadConnection {
         +Authorize(action, table, column, view) AuthorizerResult
@@ -359,7 +364,7 @@ classDiagram
 
     Planner --> ILlmProvider
     Planner --> PlannerTools : leitura
-    Planner --> PlanEngine : submit_plan (só simula)
+    Planner --> PlanEngine : propose_plan (só simula)
     Planner ..> PlannerResult
     PlannerTools --> AiReadConnection
     Planner ..> SkillRegistry : feature 4
@@ -539,12 +544,22 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
 - **RAG:** chunks por seção `##`, embeddings de 1.536 dimensões, `sqlite-vec` como banco vetorial, busca híbrida BM25 + cosseno com top-4.
 - **Fine-tuning:** um modelo aberto pequeno com LoRA transforma pedidos em `{intent, recipe, params}`. Métricas: *exact match*, F1 por campo e % de JSON válido, comparados com o Haiku em *few-shot*.
 - **Dados:** 22 documentos **fictícios** em [`knowledge/`](knowledge/README.md) (procedimentos e políticas de um centro de distribuição inventado).
+- **Ferramentas da IA:** oito de leitura (`search_products`, `get_product`, `get_stock`, `search_locations`, `search_zones`, `search_lots`, `search_orders`, `search_partners`), `propose_plan` (até 3 alternativas, só simula) e `offer_options` (botões). A IA só vê o que o direito efetivo permite.
+- **Modo proativo:** assume padrões razoáveis e lista as suposições. Se a zona, o endereço ou o produto não existe, propõe o plano que o cria antes da movimentação.
 - **Pontos difíceis:** alucinação, pedidos fora do escopo e prompt injection, com métricas e conjuntos de avaliação em [`references/IA.md`](references/IA.md), seção 5.
 
 ## Parte de Segurança
 
 - **Modelo de dados** com cada coluna classificada como pública, interna ou sensível e a proteção dos sensíveis (AES-GCM, mascaramento, SQLCipher): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 2.
 - **Matriz de papéis:** operador, supervisor, administrador, auditor e agente IA, com os pontos de `DENY` (seção 3).
+- **Catálogo de operações:** 20 operações da DSL v1, cada uma com permissão e risco. Quatro são críticas e exigem outro supervisor:
+
+| Risco | Operações |
+|-------|-----------|
+| Crítico | `adjust_stock`, `cancel_inbound_order`, `ship_order`, `cancel_outbound_order` |
+| Reversível | `receive_goods`, `move_stock`, `create_product`, `update_product`, `create_supplier`, `create_customer`, `create_zone`, `update_zone`, `create_location`, `create_location_range`, `update_location`, `create_inbound_order`, `create_outbound_order`, `reserve_stock`, `release_reservation`, `pick_items` |
+
+Permissão e regras de cada uma em [`references/ARQUITETURA.md`](references/ARQUITETURA.md), seção 5.
 - **Ameaças e gargalo**, e como provamos a defesa (seção 4).
 - **Otimização medida** com 1 milhão de movimentos (seção 5):
 
@@ -572,17 +587,17 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
   - **Simulação:** roda o mesmo código da execução, dentro de uma transação desfeita, então a pré-visualização mostra exatamente o que vai acontecer.
   - **Execução:** transacional, tudo ou nada, com a auditoria gravada na mesma transação.
   - **Aprovação:**
-    - planos críticos (`adjust_stock`) esperam um supervisor diferente de quem pediu;
+    - planos críticos (`adjust_stock`, `cancel_inbound_order`, `ship_order`, `cancel_outbound_order`) esperam um supervisor diferente de quem pediu;
     - a IA nunca aprova;
     - o que pode rodar é decidido pelos direitos de quem pediu, não de quem aprova.
-  - **Tela "Novo plano":** monta um plano sem LLM, mostra a pré-visualização e envia.
-  - **Atualização de bancos antigos:** um banco existente é atualizado na abertura por migrações versionadas (`db/migrations/`).
+  - **Tela "Novo plano":** formulários gerados do catálogo, com listas de escolha e o próximo código livre. Monta o plano sem LLM, mostra a pré-visualização e envia.
+  - **Atualização de bancos antigos:** um banco existente é atualizado na abertura por migrações versionadas (`db/migrations/`), até a versão 4 (reservas por pedido).
 
 ## Parte de integração
 
 - **Diagrama único** juntando banco, LLM e RAG, com permissões, proteção de dados e auditoria marcadas: seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima, incluindo os ataques.
-- **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada nem vê dados sensíveis.
-- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (34 testes) e nos testes do app em `tests/Nexus.Tests` (458 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
+- **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada nem vê dados sensíveis. Desde 2026-11-08 ela tem os direitos operacionais do usuário (ajuste, expedição, cadastros e pedidos), com confirmação de quem pediu e aprovação de outro supervisor para críticos.
+- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (58 testes) e nos testes do app em `tests/Nexus.Tests` (894 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
 
 ## Como rodar
 
@@ -612,11 +627,14 @@ dotnet test tests/Nexus.Tests                # testes do app
 
 No primeiro uso o app cria o banco criptografado a partir dos scripts de `db/` e guarda as chaves no cofre do sistema. Para entrar, use um dos usuários fictícios (`op.joao`, `sup.maria`, `adm.carlos`, `aud.lucia`) com a **senha de demonstração `demo`**. Essa senha existe só para os dados fictícios do repositório e nunca deve ser usada com dados reais.
 
-Para o **Nexus** conversar, o administrador (`adm.carlos`) cola a chave de API da DeepSeek em **Configurações → Provedor de LLM**. A chave vai para o cofre do sistema, nunca para o banco nem para o repositório. Depois disso, peça em linguagem natural (ex.: "guarde as 40 caixas do ABC-123 da doca em A-02-01"):
-- o Nexus consulta o estoque pelas views `v_ai_*` e devolve uma **proposta** com o efeito simulado;
-- nada é gravado até quem pediu clicar em **Confirmar**.
+Para o **Nexus** conversar, o administrador (`adm.carlos`) cola a chave de API da DeepSeek em **Configurações → Provedor de LLM**. A chave vai para o cofre do sistema, nunca para o banco nem para o repositório. Depois disso, peça em linguagem natural. Exemplos:
+- "guarde as 40 caixas do ABC-123 da doca em A-02-01": o Nexus consulta o estoque pelas views `v_ai_*` e devolve uma **proposta** com o efeito simulado;
+- "guarde 10 cx do ABC-123 em Q-01-01", com a zona Q ainda inexistente: o Nexus propõe, num só plano, a zona Q, os endereços e a movimentação, e lista as suposições (capacidade, por exemplo);
+- "quais endereços da zona A têm espaço para 40 caixas?": o Nexus consulta e responde, e pode oferecer os próximos passos como botões.
 
-Ajustes de estoque e cadastro de endereços ficam fora do alcance da IA e são feitos na tela **Novo plano**. Planos de ajuste ficam em **Planos** esperando a aprovação de outro supervisor. Arquivos `.db` são ignorados pelo git.
+Nada é gravado até quem pediu clicar em **Confirmar**. Quando há mais de uma forma de fazer, o Nexus mostra até três propostas para escolher. Cada proposta traz o porquê e as suposições assumidas; SKU, endereço, zona e pedido aparecem destacados na resposta.
+
+Ajustes, expedições e cancelamentos também podem ser pedidos, desde que quem pede tenha o direito. Planos críticos ficam em **Planos** esperando a aprovação de outro supervisor. A tela **Novo plano** continua disponível para montar qualquer plano sem IA. Arquivos `.db` são ignorados pelo git.
 
 ## Documentação
 

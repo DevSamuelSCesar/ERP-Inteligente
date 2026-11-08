@@ -20,7 +20,11 @@ public sealed partial class DraftPlanViewModel : ViewModelBase
     private readonly PlanDraft _draft;
     private readonly IPlanService _plans;
 
-    public DraftPlanViewModel(PlanDraft draft, PlanPreview preview, IPlanService plans)
+    /// <param name="proposal">Title, rationale and assumptions given by the Planner; null for a bare draft.</param>
+    /// <param name="index">0-based position among the alternatives of the same answer.</param>
+    /// <param name="count">How many alternatives the answer has.</param>
+    public DraftPlanViewModel(PlanDraft draft, PlanPreview preview, IPlanService plans,
+        NexusProposal? proposal = null, int index = 0, int count = 1, IEnumerable<string>? productNames = null)
     {
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(preview);
@@ -29,7 +33,15 @@ public sealed partial class DraftPlanViewModel : ViewModelBase
 
         _draft = draft;
         _plans = plans;
-        Title = string.IsNullOrEmpty(draft.Skill) ? "Proposta do Nexus" : $"Proposta do Nexus · {draft.Skill}";
+        var label = count > 1 ? $"Opção {index + 1} de {count}" : "Proposta do Nexus";
+        Title = !string.IsNullOrWhiteSpace(proposal?.Title) ? $"{label} · {proposal.Title}"
+            : string.IsNullOrEmpty(draft.Skill) ? label : $"{label} · {draft.Skill}";
+        Rationale = string.IsNullOrWhiteSpace(proposal?.Rationale) ? null : new TextBodyViewModel(proposal.Rationale, productNames: productNames);
+        Assumptions = (proposal?.Assumptions ?? [])
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Take(MaxAssumptions)
+            .Select(a => new TextBodyViewModel(a, productNames: productNames))
+            .ToList();
         IsCritical = preview.Risk == PlanRisk.Critical;
         Steps = preview.Steps.Select(PlanBoardViewModel.ToLine).ToList();
         Effect = preview.Effect is { } effect ? new SummaryViewModel(effect) : null;
@@ -42,7 +54,16 @@ public sealed partial class DraftPlanViewModel : ViewModelBase
     /// <summary>Raised once when the proposal stops waiting for the requester (confirmed, discarded or failed).</summary>
     public event EventHandler? Decided;
 
+    public const int MaxAssumptions = 8;
+
     public string Title { get; }
+
+    /// <summary>Why the Planner chose this path, highlighted like any answer.</summary>
+    public TextBodyViewModel? Rationale { get; }
+
+    /// <summary>Values the Planner assumed because the request did not give them.</summary>
+    public IReadOnlyList<TextBodyViewModel> Assumptions { get; }
+    public bool HasAssumptions => Assumptions.Count > 0;
     public bool IsCritical { get; }
     public string RiskText => IsCritical ? "Crítico" : "Reversível";
     public IReadOnlyList<PlanStepLine> Steps { get; }
@@ -95,6 +116,15 @@ public sealed partial class DraftPlanViewModel : ViewModelBase
         State = DraftState.Discarded;
         Refresh();
         Decided?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Another alternative of the same answer was confirmed: this one ends without being written.</summary>
+    public void Supersede()
+    {
+        if (State != DraftState.Pending) return;
+        State = DraftState.Discarded;
+        Refresh();
+        StatusText = "Outra opção foi escolhida. Nada foi gravado desta.";
     }
 
     private void Refresh(int? planId = null)

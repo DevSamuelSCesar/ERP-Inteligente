@@ -49,9 +49,9 @@ internal sealed class MoveStockHandler : IOperationHandler
         var from = FindLocation(ctx, fromCode);
         var to = FindLocation(ctx, toCode);
         if (from is null)
-            errors.Add(Error(step, "from", "business.unknown_location", UnknownLocation(fromCode)));
+            errors.Add(Error(step, "from", "business.unknown_location", UnknownLocation(ctx, fromCode)));
         if (to is null)
-            errors.Add(Error(step, "to", "business.unknown_location", UnknownLocation(toCode)));
+            errors.Add(Error(step, "to", "business.unknown_location", UnknownLocation(ctx, toCode)));
         if (from is null || to is null) return null;
 
         var qty = Int(args, "qty") ?? 0;

@@ -19,20 +19,33 @@ public enum PlanFieldKind
     Decimal,
     Date,
     Flag,
+    /// <summary>Order items typed one per line as "SKU quantidade".</summary>
+    Lines,
 }
 
 /// <summary>One input of the operation form; <see cref="Key"/> is the DSL argument name.</summary>
-public sealed partial class PlanFieldViewModel(string key, string label, PlanFieldKind kind, bool required, string hint = "")
+public sealed partial class PlanFieldViewModel(string key, string label, PlanFieldKind kind, bool required, string hint = "",
+    PlanLookup lookup = PlanLookup.None)
     : ObservableObject
 {
+    public PlanFieldViewModel(PlanFieldSpec spec) : this(spec.Key, spec.Label, spec.Kind, spec.Required, spec.Hint, spec.Lookup) { }
+
     public string Key { get; } = key;
     public string Label { get; } = required ? label : $"{label} (opcional)";
     public PlanFieldKind Kind { get; } = kind;
     public bool IsRequired { get; } = required;
+    public PlanLookup Lookup { get; } = lookup;
     /// <summary>Example shown while the field is empty; prefixed so it is never mistaken for a value.</summary>
-    public string Hint { get; } = hint.Length == 0 ? "" : hint == "AAAA-MM-DD" ? hint : $"ex.: {hint}";
+    public string Hint { get; } = hint.Length == 0 ? "" : hint.StartsWith("AAAA", StringComparison.Ordinal) || hint.Contains('(') ? hint : $"ex.: {hint}";
     public bool IsFlag => Kind == PlanFieldKind.Flag;
-    public bool IsText => Kind != PlanFieldKind.Flag;
+    public bool IsLines => Kind == PlanFieldKind.Lines;
+    public bool IsText => Kind is not (PlanFieldKind.Flag or PlanFieldKind.Lines) && Suggestions.Count == 0;
+    public bool HasSuggestions => Kind is not (PlanFieldKind.Flag or PlanFieldKind.Lines) && Suggestions.Count > 0;
+
+    /// <summary>Existing values to pick from (SKUs, codes, names); typing anything else is still allowed.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsText), nameof(HasSuggestions))]
+    public partial IReadOnlyList<string> Suggestions { get; set; } = [];
 
     [ObservableProperty]
     public partial string Value { get; set; } = "";
@@ -43,8 +56,7 @@ public sealed partial class PlanFieldViewModel(string key, string label, PlanFie
 
 /// <summary>An operation the user may plan, with its form fields (mirrors the DSL v1 schemas).</summary>
 public sealed record PlanOperationOption(
-    string Op, string Label, string Permission, string Intent, string Skill,
-    IReadOnlyList<(string Key, string Label, PlanFieldKind Kind, bool Required, string Hint)> Fields);
+    string Op, string Label, string Permission, string Intent, string Skill, IReadOnlyList<PlanFieldSpec> Fields);
 
 /// <summary>A step added to the draft, shown as a tabular line.</summary>
 public sealed record DraftStepLine(int Number, string Operation, string Description, PlanDraftStep Step);
@@ -60,63 +72,26 @@ public sealed partial class NewPlanViewModel : PageViewModel
     private readonly UserSession _user;
     private readonly IPlanService _plans;
     private readonly IDialogService _dialogs;
+    private readonly IQueryService? _queries;
     private PlanDraft? _previewedDraft;
+    private Dictionary<PlanLookup, IReadOnlyList<string>> _lookups = [];
+    private IReadOnlyList<LocationRow> _locations = [];
 
-    public NewPlanViewModel(UserSession user, IPlanService plans, IDialogService dialogs)
+    /// <param name="queries">Source of the pick-lists (SKUs, codes, partners); without it every field is free text.</param>
+    public NewPlanViewModel(UserSession user, IPlanService plans, IDialogService dialogs, IQueryService? queries = null)
     {
         _user = user;
         _plans = plans;
         _dialogs = dialogs;
+        _queries = queries;
         Operations = AllOperations.Where(o => user.Has(o.Permission)).ToList();
         SelectedOperation = Operations.FirstOrDefault();
     }
 
     public override string Title => "Novo plano";
 
-    public static IReadOnlyList<PlanOperationOption> AllOperations { get; } =
-    [
-        new("receive_goods", "Recebimento", "stock.receive", "receive", "recebimento",
-        [
-            ("sku", "SKU", PlanFieldKind.Text, true, "ABC-123"),
-            ("qty", "Quantidade", PlanFieldKind.Integer, true, ""),
-            ("location", "Doca", PlanFieldKind.Text, true, "DOCA-01"),
-            ("lot", "Lote", PlanFieldKind.Text, false, ""),
-            ("expires_on", "Validade", PlanFieldKind.Date, false, "AAAA-MM-DD"),
-            ("inbound_order", "Pedido de entrada", PlanFieldKind.Text, false, "NF-FICT-000102"),
-        ]),
-        new("move_stock", "Movimentação", "stock.move", "putaway", "armazenagem",
-        [
-            ("sku", "SKU", PlanFieldKind.Text, true, "ABC-123"),
-            ("qty", "Quantidade", PlanFieldKind.Integer, true, ""),
-            ("from", "Origem", PlanFieldKind.Text, true, "DOCA-01"),
-            ("to", "Destino", PlanFieldKind.Text, true, "A-02-01"),
-            ("lot", "Lote", PlanFieldKind.Text, false, ""),
-        ]),
-        new("adjust_stock", "Ajuste de estoque", "stock.adjust", "adjust", "inventario",
-        [
-            ("sku", "SKU", PlanFieldKind.Text, true, "ALI-300"),
-            ("qty", "Quantidade (negativa para baixa)", PlanFieldKind.Integer, true, "-1"),
-            ("location", "Endereço", PlanFieldKind.Text, true, "C-01-01"),
-            ("lot", "Lote", PlanFieldKind.Text, false, ""),
-            ("reason", "Motivo", PlanFieldKind.Text, true, "Avaria na embalagem"),
-        ]),
-        new("create_product", "Cadastro de produto", "catalog.manage", "create_product", "cadastros",
-        [
-            ("sku", "SKU", PlanFieldKind.Text, true, "ABC-125"),
-            ("name", "Nome", PlanFieldKind.Text, true, ""),
-            ("unit", "Unidade", PlanFieldKind.Text, true, "cx"),
-            ("description", "Descrição", PlanFieldKind.Text, false, ""),
-            ("weight_kg", "Peso (kg)", PlanFieldKind.Decimal, false, ""),
-            ("unit_cost", "Custo unitário", PlanFieldKind.Decimal, false, ""),
-            ("tracks_expiry", "Controla validade", PlanFieldKind.Flag, false, ""),
-        ]),
-        new("create_location", "Cadastro de endereço", "location.manage", "create_location", "cadastros",
-        [
-            ("code", "Código", PlanFieldKind.Text, true, "A-03-01"),
-            ("zone", "Zona", PlanFieldKind.Text, true, "A"),
-            ("capacity", "Capacidade", PlanFieldKind.Integer, true, "60"),
-        ]),
-    ];
+    /// <summary>Every operation of the catalog, with a form generated from its schema (<see cref="PlanForms"/>).</summary>
+    public static IReadOnlyList<PlanOperationOption> AllOperations { get; } = PlanForms.Build(Core.Engine.OperationCatalog.V1);
 
     public IReadOnlyList<PlanOperationOption> Operations { get; }
     public bool CanPlan => Operations.Count > 0;
@@ -162,12 +137,82 @@ public sealed partial class NewPlanViewModel : PageViewModel
 
     partial void OnSelectedOperationChanged(PlanOperationOption? value)
     {
+        foreach (var old in Fields)
+            old.PropertyChanged -= OnFieldChanged;
         Fields.Clear();
         FormError = null;
         if (value is null)
             return;
-        foreach (var f in value.Fields)
-            Fields.Add(new PlanFieldViewModel(f.Key, f.Label, f.Kind, f.Required, f.Hint));
+        foreach (var spec in value.Fields)
+        {
+            var field = new PlanFieldViewModel(spec) { Suggestions = _lookups.GetValueOrDefault(spec.Lookup, []) };
+            field.PropertyChanged += OnFieldChanged;
+            Fields.Add(field);
+        }
+    }
+
+    /// <summary>Loads the pick-lists once per visit; a failure only leaves the fields as free text.</summary>
+    public override async Task OnActivatedAsync()
+    {
+        if (_queries is null) return;
+        try
+        {
+            var products = await _queries.GetProductsAsync();
+            _locations = await _queries.GetLocationsAsync();
+            var zones = await _queries.GetZonesAsync();
+            var partners = await _queries.GetPartnersAsync();
+            var orders = await _queries.GetOrdersAsync();
+            _lookups = new Dictionary<PlanLookup, IReadOnlyList<string>>
+            {
+                [PlanLookup.Sku] = products.Select(p => p.Sku).ToList(),
+                [PlanLookup.Unit] = products.Select(p => p.Unit).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
+                [PlanLookup.Location] = _locations.Select(l => l.Code).ToList(),
+                [PlanLookup.Zone] = zones.Where(z => z.IsActive).Select(z => z.Code).ToList(),
+                [PlanLookup.Supplier] = partners.Where(p => p.Kind == "Fornecedor" && p.IsActive).Select(p => p.Name).ToList(),
+                [PlanLookup.Customer] = partners.Where(p => p.Kind == "Cliente" && p.IsActive).Select(p => p.Name).ToList(),
+                [PlanLookup.InboundOrder] = orders.Where(o => o.Kind == "Entrada").Select(o => o.Number).ToList(),
+                [PlanLookup.OutboundOrder] = orders.Where(o => o.Kind == "Saída").Select(o => o.Number).ToList(),
+            };
+            foreach (var field in Fields)
+                field.Suggestions = _lookups.GetValueOrDefault(field.Lookup, []);
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError("Plan form lookups unavailable: {0}", ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Choosing a zone fills what the operator would otherwise look up by hand: the next free code for a new location,
+    /// the next free aisle and the zone's usual capacity for a range. Only empty fields are filled.
+    /// </summary>
+    private void OnFieldChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PlanFieldViewModel.Value) || sender is not PlanFieldViewModel { Key: "zone" } zoneField)
+            return;
+        var zone = zoneField.Value.Trim().ToUpperInvariant();
+        if (zone.Length == 0 || SelectedOperation is not { } op)
+            return;
+
+        var codes = _locations.Select(l => l.Code).ToList();
+        var inZone = _locations.Where(l => l.Code.StartsWith(zone + "-", StringComparison.Ordinal)).ToList();
+        var typical = inZone.GroupBy(l => l.Capacity).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault();
+        void Fill(string key, string value)
+        {
+            if (Fields.FirstOrDefault(f => f.Key == key) is { } field && field.Value.Length == 0)
+                field.Value = value;
+        }
+
+        if (op.Op == "create_location")
+            Fill("code", PlanForms.NextLocationCode(zone, codes));
+        if (op.Op == "create_location_range")
+        {
+            Fill("aisle", PlanForms.NextFreeAisle(zone, codes).ToString(CultureInfo.InvariantCulture));
+            Fill("level_from", "1");
+            Fill("level_to", "5");
+        }
+        if (op.Op is "create_location" or "create_location_range" && typical > 0)
+            Fill("capacity", typical.ToString(CultureInfo.InvariantCulture));
     }
 
     private bool CanAddStep() => !IsBusy && SelectedOperation is not null && Steps.Count < MaxSteps;
@@ -193,6 +238,18 @@ public sealed partial class NewPlanViewModel : PageViewModel
             }
 
             var text = field.Value.Trim();
+            if (field.IsLines && text.Length > 0)
+            {
+                if (PlanForms.ParseLines(text, out var linesError) is not { } items)
+                {
+                    FormError = linesError;
+                    return;
+                }
+                args[field.Key] = items;
+                parts.Add($"{field.Label.Replace(" (opcional)", "")}: " +
+                          string.Join(", ", items.Select(i => $"{i["sku"]} {i["qty"]}")));
+                continue;
+            }
             if (text.Length == 0)
             {
                 if (field.IsRequired)
@@ -208,7 +265,7 @@ public sealed partial class NewPlanViewModel : PageViewModel
                 PlanFieldKind.Integer => int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var i) ? i : null,
                 PlanFieldKind.Decimal => decimal.TryParse(text.Replace(',', '.'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var d) ? d : null,
                 PlanFieldKind.Date => DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) ? text : null,
-                _ => field.Key is "sku" or "location" or "from" or "to" or "code" or "zone" ? text.ToUpperInvariant() : text,
+                _ => PlanForms.CodeFields.Contains(field.Key) ? text.ToUpperInvariant() : text,
             };
             if (value is null)
             {

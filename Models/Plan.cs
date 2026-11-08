@@ -28,6 +28,21 @@ public enum PlanOperation
     AdjustStock,
     CreateProduct,
     CreateLocation,
+    CreateZone,
+    UpdateZone,
+    CreateLocationRange,
+    UpdateLocation,
+    UpdateProduct,
+    CreateSupplier,
+    CreateCustomer,
+    CreateInboundOrder,
+    CancelInboundOrder,
+    CreateOutboundOrder,
+    ReserveStock,
+    ReleaseReservation,
+    PickItems,
+    ShipOrder,
+    CancelOutboundOrder,
 }
 
 /// <summary>One step of a plan, already expressed in business terms for display.</summary>
@@ -64,7 +79,8 @@ public sealed class Plan
     public IReadOnlyList<PlanStep> Steps { get; }
 
     /// <summary>The plan risk is the highest risk among its steps.</summary>
-    public PlanRisk Risk => Steps.Any(s => s.Operation == PlanOperation.AdjustStock) ? PlanRisk.Critical : PlanRisk.Reversible;
+    public PlanRisk Risk => Steps.Any(s => s.Operation is PlanOperation.AdjustStock or PlanOperation.CancelInboundOrder
+        or PlanOperation.ShipOrder or PlanOperation.CancelOutboundOrder) ? PlanRisk.Critical : PlanRisk.Reversible;
 
     public PlanStatus Status { get; internal set; } = PlanStatus.Validating;
     public string? DecidedByName { get; internal set; }

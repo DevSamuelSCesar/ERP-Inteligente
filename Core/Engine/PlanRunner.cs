@@ -21,6 +21,10 @@ public static class PlanRunner
     {
         new ReceiveGoodsHandler(), new MoveStockHandler(), new AdjustStockHandler(),
         new CreateProductHandler(), new CreateLocationHandler(),
+        new CreateZoneHandler(), new UpdateZoneHandler(), new CreateLocationRangeHandler(), new UpdateLocationHandler(),
+        new UpdateProductHandler(), new CreateSupplierHandler(), new CreateCustomerHandler(),
+        new CreateInboundOrderHandler(), new CancelInboundOrderHandler(), new CreateOutboundOrderHandler(),
+        new ReserveStockHandler(), new ReleaseReservationHandler(), new PickItemsHandler(), new ShipOrderHandler(), new CancelOutboundOrderHandler(),
     }.ToDictionary(h => h.Op, StringComparer.Ordinal);
 
     /// <param name="isAllowed">Whether the requester currently holds a permission code.</param>

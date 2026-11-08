@@ -9,6 +9,7 @@
                   IsVisible="{Binding IsError}" />
         <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Margin="0,2,8,0" VerticalAlignment="Top"
                   IsVisible="{Binding IsWarning}" />
-        <SelectableTextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+        <!-- Runs are built in code-behind from Segments: entities highlighted with the data palette (UI.md, 4.2) -->
+        <SelectableTextBlock Name="Body" Grid.Column="1" TextWrapping="Wrap" />
     </Grid>
 </UserControl>

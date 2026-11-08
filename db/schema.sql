@@ -57,6 +57,7 @@ CREATE TABLE zones (
     warehouse_id INTEGER NOT NULL REFERENCES warehouses (id),
     code         TEXT NOT NULL,
     name         TEXT NOT NULL,
+    is_active    INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     UNIQUE (warehouse_id, code)
 ) STRICT;
 
@@ -106,7 +107,8 @@ CREATE TABLE suppliers (
     cnpj_enc          BLOB,
     contact_name_enc  BLOB,
     contact_email_enc BLOB,
-    phone_enc         BLOB
+    phone_enc         BLOB,
+    is_active         INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
 ) STRICT;
 
 CREATE TABLE customers (
@@ -115,7 +117,8 @@ CREATE TABLE customers (
     document_masked   TEXT,
     document_enc      BLOB,
     address_enc       BLOB,
-    contact_email_enc BLOB
+    contact_email_enc BLOB,
+    is_active         INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
 ) STRICT;
 
 CREATE TABLE inbound_orders (
@@ -208,6 +211,24 @@ CREATE TABLE stock_movements (
     created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     CHECK (kind <> 'adjust' OR reason IS NOT NULL)
 ) STRICT;
+
+-- Which order holds how much of which balance. stock_balances.reserved_qty is the sum of the open rows
+-- (state 'reserved' or 'picked') of its balance. quantity never changes: a partial operation releases the row and
+-- inserts new ones. Transitions are guarded by triggers in security.sql.
+CREATE TABLE order_reservations (
+    id                     INTEGER PRIMARY KEY,
+    warehouse_id           INTEGER NOT NULL REFERENCES warehouses (id),
+    outbound_order_line_id INTEGER NOT NULL REFERENCES outbound_order_lines (id),
+    balance_id             INTEGER NOT NULL REFERENCES stock_balances (id),
+    quantity               INTEGER NOT NULL CHECK (quantity > 0),
+    state                  TEXT NOT NULL DEFAULT 'reserved' CHECK (state IN ('reserved', 'picked', 'shipped', 'released')),
+    created_plan_id        INTEGER REFERENCES plans (id),
+    updated_plan_id        INTEGER REFERENCES plans (id),
+    created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+) STRICT;
+
+CREATE INDEX idx_order_reservations_line    ON order_reservations (outbound_order_line_id, state);
+CREATE INDEX idx_order_reservations_balance ON order_reservations (balance_id, state);
 
 -- ---------------------------------------------------------------------------
 -- AI memory and knowledge base (RAG)

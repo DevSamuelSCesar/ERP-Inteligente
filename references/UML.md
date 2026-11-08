@@ -168,28 +168,33 @@ classDiagram
 
     class Planner {
         +RunAsync(UserSession user, PlannerTurn[] history, string request) Task~PlannerResult~
+        +propose_plan()
+        +offer_options()
     }
     class PlannerResult {
         <<abstract>>
     }
     class PlannerAnswer
-    class PlannerProposal {
-        +PlanDraft Draft
-        +EnginePreview Preview
+    class PlannerProposals {
+        +ProposalItem[] Items
+        +string? Text
+        +PlannerOption[] Options
     }
     class PlannerEscalated
     class PlannerFailed
     PlannerResult <|-- PlannerAnswer
-    PlannerResult <|-- PlannerProposal
+    PlannerResult <|-- PlannerProposals
     PlannerResult <|-- PlannerEscalated
     PlannerResult <|-- PlannerFailed
     class PlannerTools {
         +search_products()
         +get_product()
         +get_stock()
-        +find_location()
-        +list_inbound_orders()
-        +list_outbound_orders()
+        +search_locations()
+        +search_zones()
+        +search_lots()
+        +search_orders()
+        +search_partners()
     }
     class AiReadConnection {
         +Authorize(action, table, column, view) AuthorizerResult
@@ -215,7 +220,7 @@ classDiagram
 
     Planner --> ILlmProvider
     Planner --> PlannerTools : leitura
-    Planner --> PlanEngine : submit_plan (só simula)
+    Planner --> PlanEngine : propose_plan (só simula)
     Planner ..> PlannerResult
     PlannerTools --> AiReadConnection
     Planner ..> SkillRegistry : feature 4

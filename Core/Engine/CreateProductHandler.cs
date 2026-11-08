@@ -35,30 +35,14 @@ internal sealed class CreateProductHandler : IOperationHandler
             insert.Parameters.AddWithValue("$name", name);
             insert.Parameters.AddWithValue("$desc", (object?)description ?? DBNull.Value);
             insert.Parameters.AddWithValue("$unit", unit);
-            insert.Parameters.AddWithValue("$weight", ReadDouble(args, "weight_kg") is double w ? w : DBNull.Value);
-            insert.Parameters.AddWithValue("$exp", args["tracks_expiry"] is JsonValue t && t.TryGetValue<bool>(out var b) && b ? 1 : 0);
+            insert.Parameters.AddWithValue("$weight", Dbl(args, "weight_kg") is double w ? w : DBNull.Value);
+            insert.Parameters.AddWithValue("$exp", Bool(args, "tracks_expiry") == true ? 1 : 0);
             id = Convert.ToInt64(insert.ExecuteScalar(), CultureInfo.InvariantCulture);
         }
 
-        if (ReadDecimal(args, "unit_cost") is decimal cost)
-        {
-            var cipher = ctx.Cipher.Encrypt(cost.ToString(CultureInfo.InvariantCulture), "products", "unit_cost_enc", id);
-            using var update = ctx.Command("UPDATE products SET unit_cost_enc = $c WHERE id = $id");
-            update.Parameters.AddWithValue("$c", cipher);
-            update.Parameters.AddWithValue("$id", id);
-            update.ExecuteNonQuery();
-        }
+        if (Dec(args, "unit_cost") is decimal cost)
+            StoreUnitCost(ctx, id, cost);
         ctx.Diff.AddCreated("Produto", sku, name);
         return sku;
-    }
-
-    private static double? ReadDouble(JsonObject args, string name) =>
-        args[name] is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;
-
-    private static decimal? ReadDecimal(JsonObject args, string name)
-    {
-        if (args[name] is not JsonValue v) return null;
-        if (v.TryGetValue<decimal>(out var m)) return m;
-        return v.TryGetValue<double>(out var d) ? (decimal)d : null;
     }
 }

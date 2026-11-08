@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Estado atual
 
-A stack está definida em `references/STACK.md` (app desktop nativo em C# com Avalonia, SQLite, instruções de LLM em JSON/Markdown, provedores DeepSeek, Claude e OpenAI). A documentação no código (comentários, XML docs, identificadores, logs) é em inglês. A arquitetura adotada está em `references/ARQUITETURA.md`: o LLM lê dados por tool calling, mas só altera dados enviando um plano JSON (`submit_plan`), que um motor determinístico valida, simula e executa numa transação; planos bem-sucedidos viram receitas reutilizáveis sem LLM. `references/PROPOSTAS_ARQUITETURA.md` guarda as alternativas avaliadas. O banco é só SQLite (SQLCipher, FTS5, `sqlite-vec`); SQL Server, MongoDB e n8n não fazem parte do projeto.
+A stack está definida em `references/STACK.md` (app desktop nativo em C# com Avalonia, SQLite, instruções de LLM em JSON/Markdown, provedores DeepSeek, Claude e OpenAI). A documentação no código (comentários, XML docs, identificadores, logs) é em inglês. A arquitetura adotada está em `references/ARQUITETURA.md`: o LLM lê dados por tool calling, mas só altera dados enviando um plano JSON (`propose_plan`), que um motor determinístico valida, simula e executa numa transação; planos bem-sucedidos viram receitas reutilizáveis sem LLM. `references/PROPOSTAS_ARQUITETURA.md` guarda as alternativas avaliadas. O banco é só SQLite (SQLCipher, FTS5, `sqlite-vec`); SQL Server, MongoDB e n8n não fazem parte do projeto.
 
 O app C# (Avalonia, MVVM com CommunityToolkit.Mvvm) tem a interface completa e o **núcleo da feature 1** do `ROADMAP.md`. Os módulos do núcleo ficam em `Core/`:
 - `Security`: cofre do SO, chaves, Argon2id, AES-GCM.
@@ -16,12 +16,14 @@ O app C# (Avalonia, MVVM com CommunityToolkit.Mvvm) tem a interface completa e o
 - `Audit`: cadeia de hash v1.
 - `Auth`: login, bloqueio e sessão.
 - `Policy`: permissões e escopo por armazém.
-- `Engine`: motor de planos (feature 2).
+- `Engine`: motor de planos (feature 2), com 20 operações do catálogo DSL v1; `adjust_stock`, `cancel_inbound_order`, `ship_order` e `cancel_outbound_order` são críticas.
   - DSL v1 (`DslParser`) e JSON Schemas em `Core/Engine/Schemas/v1`.
   - Regras por operação (`*Handler`), `PlanSimulator` (rollback), `PlanExecutor` e `PlanEngine` (máquina de estados).
-  - Planos com origem `ai` rodam com os direitos IA ∩ usuário.
+  - Planos com origem `ai` rodam com os direitos IA ∩ usuário. A IA tem os direitos operacionais do usuário (decisão de 2026-11-08): toda proposta exige Confirmar de quem pediu e críticos exigem outro supervisor; aprovar, ler dados sensíveis, gerir usuários e papéis e ler a auditoria continuam proibidos.
 - `Llm`: `ILlmProvider` e `DeepSeekProvider` (URL fixa). `LlmSettings` guarda a chave e o modelo no cofre do SO (feature 3).
-- `Planner`: laço de tool calling, ferramentas de leitura sobre `v_ai_*`, `submit_plan` (só prévia) e o prompt de sistema em `Core/Planner/Prompts/system.md`.
+- `Planner`: laço de tool calling com 8 ferramentas de leitura sobre `v_ai_*` (`search_*` e `get_*`), `propose_plan` (até 3 alternativas, só simula), `offer_options` (botões) e o prompt de sistema em `Core/Planner/Prompts/system.md`.
+
+Migrações: `003_full_catalog` (catálogo ativo, `order.manage`, direitos operacionais da IA e as views `v_ai_zones`, `v_ai_lots`, `v_ai_partners`) e `004_reservations` (`order_reservations`); o schema está na versão 4.
 
 `AppHost` compõe o núcleo e `AppController` alterna entre login e shell. As telas leem o banco real por `Services/Sqlite/` (`EnginePlanService` liga a UI ao motor e `PlannerNexusService` liga o chat ao Planner). Planos são montados na tela "Novo plano" ou propostos pelo Nexus. Uma proposta só é gravada quando quem pediu clica em Confirmar. A chave da DeepSeek é digitada pelo administrador em Configurações. Os testes nunca chamam a API real: usam `ScriptedLlmProvider` (`tests/Nexus.Tests/Fakes`) e um `HttpMessageHandler` falso.
 

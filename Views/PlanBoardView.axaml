@@ -28,7 +28,7 @@
             <Rectangle Classes="rule" />
 
             <!-- Steps as tabular lines -->
-            <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Margin="14,8,14,4">
+            <Grid Classes="stepLine" ColumnDefinitions="180,100,84,100,120,*" Margin="14,8,14,4">
                 <TextBlock Grid.Column="0" Classes="label" Text="Operação" />
                 <TextBlock Grid.Column="1" Classes="label" Text="Qtd" />
                 <TextBlock Grid.Column="2" Classes="label" Text="SKU" />
@@ -39,7 +39,7 @@
             <ItemsControl ItemsSource="{Binding Steps}" Margin="14,0,14,10">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:PlanStepLine">
-                        <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Height="26">
+                        <Grid Classes="stepLine" ColumnDefinitions="180,100,84,100,120,*" Height="26">
                             <TextBlock Grid.Column="0" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Column="1" Classes="tabular" Text="{Binding Quantity}" />
                             <TextBlock Grid.Column="2" Classes="tabular" Text="{Binding Sku}" />

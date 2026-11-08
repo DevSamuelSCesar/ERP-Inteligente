@@ -15,7 +15,8 @@ DeepSeek e OpenAI continuam suportados pela interface `ILlmProvider` e podem ser
 **Estado da implementação (feature 3):** o primeiro adaptador implementado é o da **DeepSeek**.
 - **Modelos:** `deepseek-v4-pro` no Planner por padrão, ou `deepseek-flash`, escolhidos em Configurações. Claude e OpenAI entram na feature 8.
 - **Chave:** digitada pelo administrador e guardada no cofre do SO.
-- **Limites por pedido:** 3 planos inválidos, 8 rodadas, 8.192 tokens por chamada e 60.000 por pedido. Passou do limite, a tarefa é escalada ao operador. É a defesa contra "custo descontrolado" da seção 5.
+- **Limites por pedido:** 4 planos inválidos, 12 rodadas, 3 propostas válidas, 8.192 tokens por chamada e 60.000 por pedido. Passou do limite, a tarefa é escalada ao operador, salvo quando já há propostas válidas: essas são entregues. É a defesa contra "custo descontrolado" da seção 5.
+- **Direitos:** a IA tem os direitos operacionais do usuário que pede (decisão de 2026-11-08). Ver [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 3.1.
 
 **Privacidade:** o que sai da máquina é sempre não sensível (views `v_ai_*`, procedimentos fictícios e memórias filtradas). Por isso a escolha do provedor afeta custo e qualidade, mas não expõe CPF, contatos ou custos. Quem quiser zero envio de dados pode usar o modelo do fine-tuning e embeddings locais para receitas e RAG; o Planner ainda depende de um provedor.
 
@@ -40,11 +41,13 @@ A DeepSeek publica preços só em yuan (¥). Fora do horário de pico de Pequim,
 
 | Caminho | Chamadas | Tokens de entrada | Tokens de saída |
 |---------|---------:|------------------:|----------------:|
-| Planejamento completo | ~3 (skill, consulta, `submit_plan`) | 12.000 (acumulado) | 2.000 (inclui raciocínio) |
+| Planejamento completo | ~3 (consultas, `propose_plan`, texto final) | 12.000 (acumulado) | 2.000 (inclui raciocínio) |
 | Receita | 1 | 1.500 | 150 |
 | Embedding da pergunta | 1 | 40 | — |
 
 No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o uso, a meta é chegar a 40% e 60%.
+
+**Premissas em revisão:** o modo proativo (2026-11-08) pode fazer mais consultas por pedido e até 3 propostas. As premissas de 12.000 tokens de entrada e de 3 chamadas não foram medidas com esse modo. Refazer a conta com a medição do conjunto de avaliação (seção 5) antes de citar um custo real.
 
 ### Resultado
 
@@ -107,7 +110,10 @@ Exemplo de par de treino:
 | Alucinação de dados | Inventar um endereço ou SKU que não existe | O validador rejeita referências inexistentes | % de planos válidos na 1ª tentativa; nº médio de tentativas (50 pedidos com gabarito) |
 | Alucinação de procedimento | Afirmar uma regra que não está nos documentos | RAG com citação obrigatória da origem | % de respostas corretas e com fonte certa (40 perguntas sobre `knowledge/`); recall@4 do RAG |
 | Fora do escopo | "Calcule a folha de pagamento", "qual a previsão do tempo?" | Prompt de sistema restrito ao armazém; sem ferramentas para outros assuntos | % de recusas corretas (30 pedidos fora do escopo) |
+| Recusa ou pergunta desnecessária | "Guarde 10 cx do ABC-123 em Q-01-01" com a zona Q inexistente: o certo é propor a zona, os endereços e a movimentação | Prompt proativo: padrões, suposições e plano que cria o que falta; pergunta só com `offer_options` | % de pedidos com plano válido sem pergunta (casos proativos); % de recusas corretas (sem direito ou fora do escopo) |
 | Prompt injection | Ver [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 6.1 | Seção 12.8 da arquitetura | Taxa de sucesso do ataque (meta 0%) e taxa de detecção (25 casos) |
 | Custo descontrolado | Laço de correções de plano | Limite de tentativas e de tokens por tarefa | Tokens médios por pedido; % de pedidos resolvidos por receita |
+
+**Menos recusas são esperadas.** O modo proativo reduz as recusas de propósito, então o conjunto de avaliação deve incluir casos proativos: entidade inexistente, dado faltando e pedido sem direito. Sem esses casos, uma queda na recusa pareceria melhoria.
 
 Os conjuntos de avaliação são fictícios, versionados junto com o código e rodados a cada mudança de prompt, skill ou modelo.

@@ -15,6 +15,18 @@ public sealed record ProductRow(string Sku, string Name, string Unit, double? We
     public string TracksExpiryText => TracksExpiry ? "Sim" : "Não";
 }
 
+public sealed record ZoneRow(string Code, string Name, bool IsActive, int Locations, int Capacity, int Occupied)
+{
+    public int Free => Capacity - Occupied;
+    public string StatusText => IsActive ? "Ativa" : "Desativada";
+}
+
+/// <summary>A supplier or customer. Only the masked document is ever read; contacts and full documents stay encrypted.</summary>
+public sealed record PartnerRow(string Kind, string Name, string Document, bool IsActive)
+{
+    public string StatusText => IsActive ? "Ativo" : "Desativado";
+}
+
 public sealed record LocationRow(string Code, string Zone, int Capacity, int Occupied)
 {
     public int Free => Capacity - Occupied;

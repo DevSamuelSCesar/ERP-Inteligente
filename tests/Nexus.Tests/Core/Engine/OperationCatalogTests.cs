@@ -13,6 +13,21 @@ public class OperationCatalogTests
     [InlineData("adjust_stock", RiskLevel.Critical, "stock.adjust", PlanOperation.AdjustStock)]
     [InlineData("create_product", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateProduct)]
     [InlineData("create_location", RiskLevel.Reversible, "location.manage", PlanOperation.CreateLocation)]
+    [InlineData("create_zone", RiskLevel.Reversible, "location.manage", PlanOperation.CreateZone)]
+    [InlineData("update_zone", RiskLevel.Reversible, "location.manage", PlanOperation.UpdateZone)]
+    [InlineData("create_location_range", RiskLevel.Reversible, "location.manage", PlanOperation.CreateLocationRange)]
+    [InlineData("update_location", RiskLevel.Reversible, "location.manage", PlanOperation.UpdateLocation)]
+    [InlineData("update_product", RiskLevel.Reversible, "catalog.manage", PlanOperation.UpdateProduct)]
+    [InlineData("create_supplier", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateSupplier)]
+    [InlineData("create_customer", RiskLevel.Reversible, "catalog.manage", PlanOperation.CreateCustomer)]
+    [InlineData("create_inbound_order", RiskLevel.Reversible, "order.manage", PlanOperation.CreateInboundOrder)]
+    [InlineData("cancel_inbound_order", RiskLevel.Critical, "order.manage", PlanOperation.CancelInboundOrder)]
+    [InlineData("create_outbound_order", RiskLevel.Reversible, "order.manage", PlanOperation.CreateOutboundOrder)]
+    [InlineData("reserve_stock", RiskLevel.Reversible, "stock.reserve", PlanOperation.ReserveStock)]
+    [InlineData("release_reservation", RiskLevel.Reversible, "stock.reserve", PlanOperation.ReleaseReservation)]
+    [InlineData("pick_items", RiskLevel.Reversible, "stock.pick", PlanOperation.PickItems)]
+    [InlineData("ship_order", RiskLevel.Critical, "stock.ship", PlanOperation.ShipOrder)]
+    [InlineData("cancel_outbound_order", RiskLevel.Critical, "order.manage", PlanOperation.CancelOutboundOrder)]
     public void Operation_metadata(string name, RiskLevel risk, string permission, PlanOperation ui)
     {
         Assert.True(OperationCatalog.TryGet(name, out var def));
@@ -23,13 +38,13 @@ public class OperationCatalogTests
     }
 
     [Fact]
-    public void Adjust_stock_is_the_only_critical_operation() =>
-        Assert.Equal(["adjust_stock"], OperationCatalog.V1.Where(o => o.Risk == RiskLevel.Critical).Select(o => o.Name));
+    public void Only_adjustment_shipping_and_cancellations_are_critical() =>
+        Assert.Equal(["adjust_stock", "cancel_inbound_order", "ship_order", "cancel_outbound_order"], OperationCatalog.V1.Where(o => o.Risk == RiskLevel.Critical).Select(o => o.Name));
 
     [Fact]
-    public void Catalog_has_five_operations_and_rejects_unknown()
+    public void Catalog_has_twenty_operations_and_rejects_unknown()
     {
-        Assert.Equal(5, OperationCatalog.V1.Count);
+        Assert.Equal(20, OperationCatalog.V1.Count);
         Assert.False(OperationCatalog.TryGet("drop_table", out _));
         Assert.False(OperationCatalog.TryGet("MOVE_STOCK", out _));
         Assert.Throws<ArgumentException>(() => OperationCatalog.SchemaJson("nope"));
@@ -45,6 +60,12 @@ public class OperationCatalogTests
             Assert.Equal(op.ReferenceFields.Order().ToArray(), anyOf);
         }
         Assert.Equal(["sku", "from", "to"], OperationCatalog.V1.Single(o => o.Name == "move_stock").ReferenceFields);
+        Assert.Equal(["zone"], OperationCatalog.V1.Single(o => o.Name == "create_location_range").ReferenceFields);
+        Assert.Equal(["code"], OperationCatalog.V1.Single(o => o.Name == "update_zone").ReferenceFields);
+        Assert.Equal(["code"], OperationCatalog.V1.Single(o => o.Name == "update_location").ReferenceFields);
+        Assert.Equal(["sku"], OperationCatalog.V1.Single(o => o.Name == "update_product").ReferenceFields);
+        Assert.Equal(["order_number", "to"], OperationCatalog.V1.Single(o => o.Name == "pick_items").ReferenceFields);
+        Assert.Equal(["order_number"], OperationCatalog.V1.Single(o => o.Name == "ship_order").ReferenceFields);
     }
 
     [Fact]

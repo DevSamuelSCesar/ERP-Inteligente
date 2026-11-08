@@ -18,9 +18,10 @@ using erp_inteligente.Models;
 namespace erp_inteligente.Core.Planner;
 
 /// <summary>
-/// The Planner (references/ARQUITETURA.md, sections 1, 4 and 12.8): talks to the LLM with read tools and
-/// <c>submit_plan</c>. The model reads data through validated, parameterized queries on the read-only AI connection and
-/// can only propose a plan, which the deterministic engine validates and simulates (<c>Preview</c>, nothing is written).
+/// The Planner (references/ARQUITETURA.md, sections 1, 4 and 12.8): talks to the LLM with read tools,
+/// <c>propose_plan</c> and <c>offer_options</c>. The model reads data through validated, parameterized queries on the
+/// read-only AI connection and can only propose plans (up to <see cref="PlannerOptions.MaxProposals"/> alternatives), which
+/// the deterministic engine validates and simulates (<c>Preview</c>, nothing is written).
 /// The model is an untrusted user: every tool argument is validated, every call is audited, and tool results are
 /// wrapped as reference data.
 /// </summary>
@@ -31,9 +32,18 @@ public sealed partial class Planner(
     PolicyEngine policy,
     IAuditLog audit,
     PlanEngine engine,
-    PlannerOptions? options = null)
+    PlannerOptions? options = null,
+    TimeProvider? time = null)
 {
-    internal const string SubmitPlan = "submit_plan";
+    internal const string ProposePlan = "propose_plan";
+    internal const string OfferOptions = "offer_options";
+    internal const int MaxTitleLength = 80;
+    internal const int MaxRationaleLength = 300;
+    internal const int MaxAssumptions = 8;
+    internal const int MaxAssumptionLength = 200;
+    internal const int MaxOptions = 4;
+    internal const int MaxOptionLabelLength = 60;
+    internal const int MaxOptionRequestLength = 300;
     internal const int MaxRequestLength = 2000;
     internal const int MaxAnswerLength = 1500;
     private const int MaxToolCallsPerRound = 8;
@@ -42,6 +52,16 @@ public sealed partial class Planner(
     private const string PromptResource = "Nexus.Planner.system.md";
 
     private readonly PlannerOptions _options = options ?? PlannerOptions.Default;
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
+    /// <summary>What one run accumulates: valid proposals, suggested options and the count of rejected attempts.</summary>
+    private sealed class RunState
+    {
+        public List<ProposalItem> Proposals { get; } = [];
+        public List<PlannerOption> Options { get; set; } = [];
+        public int Invalid { get; set; }
+        public HashSet<string> PlanJsons { get; } = new(StringComparer.Ordinal);
+    }
 
     public Task<(PlannerResult Result, PlannerTurn? Turn)> RunAsync(
         UserSession user, IReadOnlyList<PlannerTurn> history, string request, IProgress<string> status, CancellationToken cancellationToken)
@@ -70,9 +90,10 @@ public sealed partial class Planner(
         }
 
         var operations = OperationCatalog.V1.Where(o => rights.Contains(o.Permission)).ToList();
-        var canSubmit = rights.Contains(Permissions.PlanSubmit) && operations.Count > 0;
+        var canPropose = rights.Contains(Permissions.PlanSubmit) && operations.Count > 0;
         var tools = PlannerTools.ReadTools().ToList();
-        if (canSubmit) tools.Add(BuildSubmitTool(operations));
+        if (canPropose) tools.Add(BuildProposeTool(operations));
+        tools.Add(BuildOfferOptionsTool());
 
         var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations)) };
         foreach (var turn in history.TakeLast(_options.MaxHistoryTurns))
@@ -83,14 +104,18 @@ public sealed partial class Planner(
         }
         messages.Add(LlmMessage.User(request));
 
+        var state = new RunState();
         var tokens = 0;
-        var invalidPlans = 0;
         status.Report("Planejando");
+
+        // With valid proposals in hand a limit never throws them away: the operator gets what was prepared.
+        (PlannerResult, PlannerTurn?) Limit(PlannerEscalated escalated) =>
+            state.Proposals.Count > 0 ? Conclude(request, state, null, null) : (escalated, null);
 
         for (var round = 1; round <= _options.MaxRounds; round++)
         {
             if (tokens >= _options.MaxTokensPerRequest)
-                return (BudgetExceeded(), null);
+                return Limit(BudgetExceeded());
 
             LlmResponse response;
             try
@@ -100,6 +125,7 @@ public sealed partial class Planner(
             }
             catch (LlmException ex)
             {
+                if (state.Proposals.Count > 0) return Conclude(request, state, null, null);
                 return (new PlannerFailed(MessageFor(ex.Kind)), null);
             }
             tokens += Math.Max(0, response.Usage.PromptTokens) + Math.Max(0, response.Usage.CompletionTokens);
@@ -107,11 +133,15 @@ public sealed partial class Planner(
             if (response.ToolCalls.Count == 0)
             {
                 var text = CleanText(response.Content);
+                if (state.Proposals.Count > 0)
+                    return Conclude(request, state, text.Length > 0 ? text : null, response.ReasoningContent);
+                if (text.Length == 0 && state.Options.Count > 0)
+                    text = "Como prefere seguir?";
                 if (text.Length == 0)
                     return response.FinishReason == LlmFinishReason.Length
                         ? (new PlannerEscalated("A resposta ficou longa demais para ser concluída. Faça um pedido mais específico."), null)
                         : (new PlannerFailed("O Nexus não devolveu uma resposta válida. Tente de novo."), null);
-                return (new PlannerAnswer(text), Remember(request, text, response));
+                return (new PlannerAnswer(text, state.Options.ToArray()), Remember(request, text, response.ReasoningContent));
             }
 
             messages.Add(LlmMessage.Assistant(response));
@@ -121,45 +151,80 @@ public sealed partial class Planner(
                 ct.ThrowIfCancellationRequested();
                 if (++index > MaxToolCallsPerRound)
                 {
-                    messages.Add(LlmMessage.ToolResult(call.Id, Wrap("tool:" + SubmitPlan, PlannerTools.Error("too_many_calls", "Chamadas demais de uma vez.").Json)));
+                    messages.Add(LlmMessage.ToolResult(call.Id, Wrap("tool:" + SafeToolName(call.Name), PlannerTools.Error("too_many_calls", "Chamadas demais de uma vez.").Json)));
                     continue;
                 }
 
-                var (outcome, proposal) = await Task.Run(() => RunTool(user, aiUserId, rights, canSubmit, call, status), ct);
-                if (proposal is not null)
-                {
-                    var text = CleanText(response.Content);
-                    var shown = text.Length > 0 ? text : null;
-                    return (proposal with { Text = shown }, Remember(request, shown ?? "Montei um plano para a sua confirmação.", response));
-                }
-                if (call.Name == SubmitPlan && !outcome.Allowed) invalidPlans++;
+                var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, state, call, status), ct);
+                if (call.Name == ProposePlan && !outcome.Allowed && outcome.Code != "too_many_proposals") state.Invalid++;
                 messages.Add(LlmMessage.ToolResult(call.Id, Wrap("tool:" + SafeToolName(call.Name), outcome.Json)));
             }
 
-            if (invalidPlans >= _options.MaxInvalidPlans)
-                return (new PlannerEscalated(
+            if (state.Proposals.Count >= _options.MaxProposals)
+                return await FinalTextAsync(user, request, state, messages, tokens, ct);
+
+            if (state.Invalid >= _options.MaxInvalidPlans)
+                return Limit(new PlannerEscalated(
                     $"Não consegui montar um plano válido em {_options.MaxInvalidPlans} tentativas. " +
-                    "Descreva o pedido com mais detalhes (SKU, quantidade e endereços) ou use a tela \"Novo plano\"."), null);
+                    "Descreva o pedido com mais detalhes (SKU, quantidade e endereços) ou use a tela \"Novo plano\"."));
         }
 
-        return (new PlannerEscalated(
-            "O pedido exigiu consultas demais e não foi concluído. Tente dividi-lo em partes menores."), null);
+        return Limit(new PlannerEscalated(
+            "O pedido exigiu consultas demais e não foi concluído. Tente dividi-lo em partes menores."));
+    }
+
+    /// <summary>The proposal limit was reached: one more round without tools asks the model for the closing text.</summary>
+    private async Task<(PlannerResult, PlannerTurn?)> FinalTextAsync(
+        UserSession user, string request, RunState state, List<LlmMessage> messages, int tokens, CancellationToken ct)
+    {
+        string? text = null;
+        string? reasoning = null;
+        if (tokens < _options.MaxTokensPerRequest)
+        {
+            try
+            {
+                var response = await llm.CompleteAsync(
+                    new LlmRequest(settings.Model, messages.ToArray(), [], _options.MaxTokensPerCall), ct);
+                if (response.ToolCalls.Count == 0 && CleanText(response.Content) is { Length: > 0 } cleaned)
+                {
+                    text = cleaned;
+                    reasoning = response.ReasoningContent;
+                }
+            }
+            catch (LlmException)
+            {
+                // The proposals are already valid; the default text is enough.
+            }
+        }
+        return Conclude(request, state, text, reasoning);
+    }
+
+    private static (PlannerResult, PlannerTurn?) Conclude(string request, RunState state, string? text, string? reasoning)
+    {
+        var shown = text ?? (state.Proposals.Count == 1
+            ? "Montei um plano para a sua confirmação."
+            : $"Montei {state.Proposals.Count} alternativas de plano para a sua escolha.");
+        var result = new PlannerProposals(state.Proposals.ToArray(), shown, state.Options.ToArray());
+        var memory = shown + " Planos: " + string.Join("; ", state.Proposals.Select(p => p.Title)) + ".";
+        return (result, Remember(request, memory.Length > MaxAnswerLength ? memory[..MaxAnswerLength] : memory, reasoning));
     }
 
     // ---- tools ---------------------------------------------------------------------------------------------
 
-    private (ToolOutcome Outcome, PlannerProposal? Proposal) RunTool(
-        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canSubmit, LlmToolCall call, IProgress<string> status)
+    private ToolOutcome RunTool(
+        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canPropose, RunState state, LlmToolCall call, IProgress<string> status)
     {
         var name = call.Name ?? string.Empty;
         try
         {
-            if (name == SubmitPlan)
+            if (name == ProposePlan)
             {
-                if (!canSubmit)
+                if (!canPropose)
                     return Finish(PlannerTools.Error("not_allowed", "Você não tem permissão para propor planos."));
-                return SubmitPlanTool(user, aiUserId, call, status);
+                return ProposePlanTool(user, aiUserId, state, call, status);
             }
+            if (name == OfferOptions)
+                return Finish(OfferOptionsTool(state, call));
             if (!PlannerTools.IsReadTool(name))
                 return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
             if (!rights.Contains(Permissions.StockRead))
@@ -176,29 +241,55 @@ public sealed partial class Planner(
             // The model must never see exception text (paths, SQL, keys).
             var failed = PlannerTools.Error("tool_failed", "A consulta falhou. Tente outra ou responda sem ela.");
             Append(aiUserId, user, "ai.tool", "tool:" + SafeToolName(name), AuditOutcome.Failed, Details(call, "tool_failed"));
-            return (failed, null);
+            return failed;
         }
 
-        (ToolOutcome, PlannerProposal?) Finish(ToolOutcome outcome, string? targetName = null)
+        ToolOutcome Finish(ToolOutcome outcome, string? targetName = null)
         {
             Append(aiUserId, user, "ai.tool", "tool:" + (targetName ?? SafeToolName(name)),
                 outcome.Allowed ? AuditOutcome.Allowed : AuditOutcome.Denied, Details(call, outcome.Code));
-            return (outcome, null);
+            return outcome;
         }
     }
 
-    private (ToolOutcome Outcome, PlannerProposal? Proposal) SubmitPlanTool(
-        UserSession user, long? aiUserId, LlmToolCall call, IProgress<string> status)
+    private ToolOutcome ProposePlanTool(UserSession user, long? aiUserId, RunState state, LlmToolCall call, IProgress<string> status)
     {
-        (ToolOutcome, PlannerProposal?) Reject(ToolOutcome outcome)
+        ToolOutcome Reject(ToolOutcome outcome)
         {
-            Append(aiUserId, user, "ai.tool", "tool:" + SubmitPlan, AuditOutcome.Denied, Details(call, outcome.Code));
-            return (outcome, null);
+            Append(aiUserId, user, "ai.tool", "tool:" + ProposePlan, AuditOutcome.Denied, Details(call, outcome.Code));
+            return outcome;
         }
 
-        var planJson = ExtractPlan(call.ArgumentsJson);
-        if (planJson is null)
-            return Reject(PlannerTools.Error("invalid_arguments", "Envie {\"plan\": {dsl_version, intent, steps}} com o documento do plano."));
+        if (state.Proposals.Count >= _options.MaxProposals)
+            return Reject(PlannerTools.Error("too_many_proposals", $"Já há {_options.MaxProposals} planos válidos. Encerre com um texto curto."));
+
+        if (!TryParseObject(call.ArgumentsJson, out var root))
+            return Reject(PlannerTools.Error("invalid_arguments", "Os argumentos não são um objeto JSON válido."));
+
+        var bad = new List<string>();
+        var title = CleanField(root, "title", MaxTitleLength, bad);
+        var rationale = CleanField(root, "rationale", MaxRationaleLength, bad);
+        var assumptions = new List<string>();
+        if (root.TryGetPropertyValue("assumptions", out var rawAssumptions) && rawAssumptions is not null)
+        {
+            if (rawAssumptions is not JsonArray list || list.Count > MaxAssumptions)
+                bad.Add("assumptions");
+            else
+                foreach (var item in list)
+                {
+                    var one = item is JsonValue v && v.TryGetValue<string>(out var t) ? CleanInline(t) : null;
+                    if (string.IsNullOrEmpty(one) || one.Length > MaxAssumptionLength) { bad.Add("assumptions"); break; }
+                    assumptions.Add(one);
+                }
+        }
+        var planJson = ExtractPlan(root);
+        if (planJson is null) bad.Add("plan");
+        if (bad.Count > 0 || title is null || rationale is null || planJson is null)
+            return Reject(PlannerTools.Error("invalid_arguments",
+                "Argumentos inválidos: " + string.Join(", ", bad.Distinct()) + ". Envie title (1 a 80), rationale (1 a 300), " +
+                "assumptions (até 8 textos de até 200) e plan {dsl_version, intent, steps}."));
+        if (!state.PlanJsons.Add(planJson))
+            return Reject(PlannerTools.Error("duplicate_plan", "Este plano já foi proposto. Proponha uma alternativa diferente ou encerre com texto."));
 
         status.Report("Validando o plano");
         EnginePreview preview;
@@ -226,21 +317,84 @@ public sealed partial class Planner(
             return Reject(new ToolOutcome(json, false, "plan_invalid"));
         }
 
-        Append(aiUserId, user, "ai.tool", "tool:" + SubmitPlan, AuditOutcome.Allowed,
-            Details(call, "plan_valid"));
-        var ok = new ToolOutcome("""{"status":"valid"}""", true, "plan_valid");
-        return (ok, new PlannerProposal(PlanDraft.FromJson(planJson, PlanOrigin.Ai), preview, null));
+        Append(aiUserId, user, "ai.tool", "tool:" + ProposePlan, AuditOutcome.Allowed, Details(call, "plan_valid"));
+        state.Proposals.Add(new ProposalItem(title, rationale, assumptions, PlanDraft.FromJson(planJson, PlanOrigin.Ai), preview));
+        var summary = new JsonObject { ["status"] = "valid", ["proposals"] = state.Proposals.Count, ["risk"] = preview.Risk.ToString().ToLowerInvariant() };
+        return new ToolOutcome(PlannerTools.Serialize(summary), true, "plan_valid");
     }
 
-    /// <summary>Gets the plan document from the arguments: <c>{"plan": {..}}</c>, <c>{"plan": "{..}"}</c> or the bare document.</summary>
-    private static string? ExtractPlan(string argumentsJson)
+    private static ToolOutcome OfferOptionsTool(RunState state, LlmToolCall call)
+    {
+        const string Hint = "Envie options: 1 a 4 itens {label (até 60), request (até 300)}.";
+        if (!TryParseObject(call.ArgumentsJson, out var root) || root["options"] is not JsonArray list || list.Count is < 1 or > MaxOptions)
+            return PlannerTools.Error("invalid_arguments", Hint);
+        var options = new List<PlannerOption>();
+        foreach (var item in list)
+        {
+            if (item is not JsonObject obj)
+                return PlannerTools.Error("invalid_arguments", Hint);
+            var bad = new List<string>();
+            var label = CleanField(obj, "label", MaxOptionLabelLength, bad);
+            var requestText = CleanField(obj, "request", MaxOptionRequestLength, bad);
+            if (label is null || requestText is null)
+                return PlannerTools.Error("invalid_arguments", Hint);
+            options.Add(new PlannerOption(label, requestText));
+        }
+        state.Options = options;
+        return new ToolOutcome("""{"status":"ok"}""", true, "options_ok");
+    }
+
+    private static bool TryParseObject(string argumentsJson, out JsonObject root)
     {
         try
         {
-            var root = JsonNode.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson,
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson,
                 null, new JsonDocumentOptions { MaxDepth = 24 });
-            if (root is not JsonObject obj) return null;
-            JsonNode? plan = obj.TryGetPropertyValue("plan", out var p) ? p : obj.ContainsKey("steps") ? obj : null;
+            root = node as JsonObject ?? new JsonObject();
+            return node is JsonObject;
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject();
+            return false;
+        }
+    }
+
+    /// <summary>A required text field: control characters removed, 1..max characters, else its name goes to <paramref name="bad"/>.</summary>
+    private static string? CleanField(JsonObject obj, string name, int max, List<string> bad)
+    {
+        var text = obj[name] is JsonValue v && v.TryGetValue<string>(out var raw) ? CleanInline(raw) : null;
+        if (string.IsNullOrEmpty(text) || text.Length > max)
+        {
+            bad.Add(name);
+            return null;
+        }
+        return text;
+    }
+
+    /// <summary>Model text shown to the operator: control, format and line-separator characters out, spaces collapsed.</summary>
+    internal static string CleanInline(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        var sb = new StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            var category = char.GetUnicodeCategory(c);
+            if (category == System.Globalization.UnicodeCategory.Format) continue;
+            sb.Append(char.IsControl(c) || category is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator ? ' ' : c);
+        }
+        return WhitespaceRuns().Replace(sb.ToString(), " ").Trim();
+    }
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex WhitespaceRuns();
+
+    /// <summary>Gets the plan document from <c>{"plan": {..}}</c> or <c>{"plan": "{..}"}</c> (a JSON string).</summary>
+    private static string? ExtractPlan(JsonObject obj)
+    {
+        try
+        {
+            var plan = obj["plan"];
             if (plan is JsonValue value && value.TryGetValue<string>(out var text))
                 plan = JsonNode.Parse(text, null, new JsonDocumentOptions { MaxDepth = 24 });
             return plan is JsonObject planObject ? planObject.ToJsonString() : null;
@@ -251,16 +405,57 @@ public sealed partial class Planner(
         }
     }
 
-    private static LlmTool BuildSubmitTool(IReadOnlyList<OperationDefinition> operations)
+    private static LlmTool BuildOfferOptionsTool()
+    {
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["required"] = new JsonArray("options"),
+            ["properties"] = new JsonObject
+            {
+                ["options"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["minItems"] = 1,
+                    ["maxItems"] = MaxOptions,
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["required"] = new JsonArray("label", "request"),
+                        ["properties"] = new JsonObject
+                        {
+                            ["label"] = new JsonObject { ["type"] = "string", ["maxLength"] = MaxOptionLabelLength, ["description"] = "Texto do botão." },
+                            ["request"] = new JsonObject { ["type"] = "string", ["maxLength"] = MaxOptionRequestLength, ["description"] = "Pedido completo que será enviado se o operador escolher." },
+                        },
+                    },
+                },
+            },
+        };
+        return new LlmTool(OfferOptions,
+            "Oferece de 1 a 4 opções clicáveis ao operador (escolhas, próximos passos). Ao escolher, o request é enviado como se ele tivesse digitado. Chame antes de responder com texto.",
+            schema.ToJsonString());
+    }
+
+    private static LlmTool BuildProposeTool(IReadOnlyList<OperationDefinition> operations)
     {
         var ops = new JsonArray(operations.Select(o => (JsonNode?)JsonValue.Create(o.Name)).ToArray());
         var schema = new JsonObject
         {
             ["type"] = "object",
             ["additionalProperties"] = false,
-            ["required"] = new JsonArray("plan"),
+            ["required"] = new JsonArray("title", "rationale", "plan"),
             ["properties"] = new JsonObject
             {
+                ["title"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = MaxTitleLength, ["description"] = "Título curto do plano." },
+                ["rationale"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = MaxRationaleLength, ["description"] = "Por que este plano atende ao pedido." },
+                ["assumptions"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["maxItems"] = MaxAssumptions,
+                    ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = MaxAssumptionLength },
+                    ["description"] = "Valores que você assumiu por falta de informação (endereço, capacidade, lote, unidade...).",
+                },
                 ["plan"] = new JsonObject
                 {
                     ["type"] = "object",
@@ -291,9 +486,9 @@ public sealed partial class Planner(
                 },
             },
         };
-        var sb = new StringBuilder("Propõe um plano de alterações (DSL v1). O plano só é simulado; nada é gravado até o operador confirmar. Argumentos por operação (* = obrigatório): ");
+        var sb = new StringBuilder("Propõe um plano de alterações (DSL v1) com título, justificativa e suposições. O plano só é simulado; nada é gravado até o operador confirmar. Pode ser chamada até 3 vezes para alternativas diferentes. Passos podem se encadear (criar zona, criar endereços, mover). Argumentos por operação (* = obrigatório): ");
         sb.AppendJoin("; ", operations.Select(DescribeArgs));
-        return new LlmTool(SubmitPlan, sb.ToString(), schema.ToJsonString());
+        return new LlmTool(ProposePlan, sb.ToString(), schema.ToJsonString());
     }
 
     private static string DescribeArgs(OperationDefinition op)
@@ -311,10 +506,10 @@ public sealed partial class Planner(
 
     // ---- prompt --------------------------------------------------------------------------------------------
 
-    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable)\}")]
+    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot)\}")]
     private static partial Regex PlaceholderPattern();
 
-    private static string BuildSystemPrompt(UserSession user, IReadOnlyList<OperationDefinition> operations)
+    private string BuildSystemPrompt(UserSession user, IReadOnlyList<OperationDefinition> operations)
     {
         using var stream = typeof(Planner).Assembly.GetManifestResourceStream(PromptResource)
             ?? throw new InvalidOperationException("Embedded resource not found: " + PromptResource);
@@ -328,8 +523,9 @@ public sealed partial class Planner(
         var unavailable = missing.Count == 0
             ? string.Empty
             : "Fora do seu alcance: " + string.Join(", ", missing.Select(o => $"{o.Name} ({o.Label})")) +
-              ". Se o pedido exigir isso, diga ao operador que é feito pela tela \"Novo plano\" (ajustes e cadastros de endereço exigem a aprovação ou a permissão dele).";
+              ". Se o pedido exigir isso, explique que falta o direito, diga quem pode fazer (supervisor ou administrador) e ofereça uma alternativa dentro do seu alcance.";
 
+        var today = _time.GetUtcNow();
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["warehouse_code"] = Sanitize(user.WarehouseCode),
@@ -337,6 +533,8 @@ public sealed partial class Planner(
             ["operator"] = Sanitize("um usuário com papel " + user.RoleName),
             ["operations"] = offered,
             ["unavailable"] = unavailable,
+            ["today"] = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            ["today_lot"] = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture),
         };
         return PlaceholderPattern().Replace(template, m => values[m.Groups[1].Value]).TrimEnd();
     }
@@ -356,8 +554,8 @@ public sealed partial class Planner(
 
     // ---- helpers -------------------------------------------------------------------------------------------
 
-    private static PlannerTurn Remember(string request, string text, LlmResponse response) =>
-        new(request, LlmMessage.Assistant(text, null, response.ReasoningContent));
+    private static PlannerTurn Remember(string request, string text, string? reasoning) =>
+        new(request, LlmMessage.Assistant(text, null, reasoning));
 
     private PlannerEscalated BudgetExceeded() =>
         new("O pedido consumiu o limite de processamento do Nexus. Tente de novo com um pedido mais específico.");
@@ -374,7 +572,7 @@ public sealed partial class Planner(
 
     /// <summary>Tool name for audit and for the data wrapper: only known names are echoed.</summary>
     private static string SafeToolName(string name) =>
-        name == SubmitPlan || PlannerTools.IsReadTool(name) ? name : "unknown";
+        name is ProposePlan or OfferOptions || PlannerTools.IsReadTool(name) ? name : "unknown";
 
     private static readonly JsonSerializerOptions DetailsOptions = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
 
@@ -384,7 +582,7 @@ public sealed partial class Planner(
         var args = call.ArgumentsJson ?? string.Empty;
         if (args.Length > MaxAuditArgsLength) args = args[..MaxAuditArgsLength] + "…";
         var name = call.Name ?? string.Empty;
-        if (!PlannerTools.IsReadTool(name) && name != SubmitPlan)
+        if (!PlannerTools.IsReadTool(name) && name is not (ProposePlan or OfferOptions))
             name = name.Length > 40 ? name[..40] : name;
         return JsonSerializer.Serialize(new { code, tool = name, args }, DetailsOptions);
     }

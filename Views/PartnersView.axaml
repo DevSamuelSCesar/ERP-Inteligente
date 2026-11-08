@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.PartnersView"
+             x:DataType="vm:PartnersViewModel">
+
+    <!-- Suppliers and customers; only the masked document is shown (references/SEGURANCA_DADOS.md) -->
+    <Grid RowDefinitions="Auto,Auto,*">
+        <TextBox Grid.Row="0" Width="400" HorizontalAlignment="Left"
+                 Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
+        <StackPanel Grid.Row="1" Margin="0,12,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}">
+            <DataGrid.Columns>
+                <DataGridTextColumn x:DataType="m:PartnerRow" Header="Tipo" Binding="{Binding Kind}" Width="110" />
+                <DataGridTextColumn x:DataType="m:PartnerRow" Header="Nome" Binding="{Binding Name}" Width="*" />
+                <DataGridTextColumn x:DataType="m:PartnerRow" Header="Documento" Binding="{Binding Document}" Width="200" />
+                <DataGridTextColumn x:DataType="m:PartnerRow" Header="Situação" Binding="{Binding StatusText}" Width="110" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

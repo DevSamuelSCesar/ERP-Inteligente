@@ -8,8 +8,8 @@
 
 O LLM usa tool calling o tempo todo, mas de duas formas diferentes:
 
-- **Ferramentas de leitura** (`get_stock`, `find_location`, `search_recipes`...) executam na hora e devolvem dados ao LLM.
-- **Alterações de dados** nunca acontecem por chamadas individuais. O LLM monta um **plano JSON** com todos os passos e o envia por uma única ferramenta, `submit_plan`. Um motor determinístico, sem LLM, valida o plano, simula o efeito e o executa numa única transação: aplica tudo ou nada.
+- **Ferramentas de leitura** (`get_stock`, `search_locations`, `search_recipes`...) executam na hora e devolvem dados ao LLM.
+- **Alterações de dados** nunca acontecem por chamadas individuais. O LLM monta um **plano JSON** com todos os passos e o envia por uma única ferramenta, `propose_plan`. Um motor determinístico, sem LLM, valida o plano e simula o efeito. Depois que quem pediu confirma, o motor executa o plano numa única transação: aplica tudo ou nada.
 
 Assim, a consistência dos dados é garantida pelo código (validação + transação) e não depende do raciocínio do modelo durante a execução.
 
@@ -19,7 +19,7 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 
 | # | Premissa | Como a arquitetura atende |
 |---|----------|---------------------------|
-| P1 | Pouca intervenção manual do operador | O LLM planeja de ponta a ponta. O humano só confirma planos de risco crítico. |
+| P1 | Pouca intervenção manual do operador | O LLM planeja de ponta a ponta. O humano confirma cada proposta; planos de risco crítico exigem um supervisor diferente de quem pediu. |
 | P2 | Pouca necessidade de conhecimento técnico | O operador conversa em linguagem natural e vê uma pré-visualização do plano em termos do negócio. |
 | P3 | Automação confiável via tool calling | Ferramentas tipadas para leitura; escrita só por planos validados e transacionais. |
 | P4 | Sistema de skills do ERP | Os procedimentos do armazém ficam em skills (Markdown + JSON) carregadas sob demanda. |
@@ -45,7 +45,7 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 ┌───────────────▼──────────────────────────────────────────────┐
 │ Planner (LLM)                                                │
 │  skill ativa · memórias relevantes · ferramentas de leitura  │
-│  → submit_plan(plano JSON)                                   │
+│  → propose_plan(plano JSON)                                  │
 └───────────────┬──────────────────────────────────────────────┘
                 │ a partir daqui, sem LLM
 ┌───────────────▼──────────────────────────────────────────────┐
@@ -72,21 +72,34 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 2. **Receita:** o Recipe Matcher procura uma receita compatível (seção 7). Se encontrar, pula para o passo 6 com o plano gerado a partir dela.
 3. **Skill:** o Planner escolhe a skill pelo índice (nome + descrição) e só então carrega o `SKILL.md` completo.
 4. **Contexto:** entram no contexto as memórias relevantes (top-k pequeno, filtrado por escopo) e as ferramentas de leitura permitidas pela skill.
-5. **Planejamento:** o LLM consulta o estado com ferramentas de leitura e chama `submit_plan`.
+5. **Planejamento:** o LLM consulta o estado com ferramentas de leitura e chama `propose_plan`, com título, justificativa, suposições e o plano.
 6. **Validação:** se o plano for inválido, o erro volta ao LLM em formato estruturado para ser corrigido, com limite de tentativas. Ao atingir o limite, a tarefa é escalada ao operador.
 7. **Simulação:** o dry-run calcula o efeito (o que entra, o que sai e o que muda de endereço) e o nível de risco do plano.
-8. **Confirmação e aprovação:** o plano montado pela IA volta ao chat como **proposta** (validada e simulada, nada gravado). Quem pediu confirma ou descarta. Ao confirmar, um plano reversível segue direto; um plano de risco crítico é mostrado a um supervisor em linguagem de negócio para aprovação.
+8. **Confirmação e aprovação:** os planos montados pela IA voltam ao chat como **propostas** (validadas e simuladas, nada gravado). Podem ser até 3 alternativas, e o chat oferece até 4 opções clicáveis. Quem pediu escolhe uma e confirma, ou descarta. Ao confirmar, um plano reversível segue direto; um plano de risco crítico vai a `pending_approval` e precisa de um supervisor diferente de quem pediu, que vê o efeito em linguagem de negócio.
 9. **Execução:** o Executor aplica todos os passos numa transação. Se qualquer passo falhar, nada é gravado.
 10. **Aprendizado:** o resultado é registrado; memórias e receitas são atualizadas (seções 7 e 8).
 
 ### Exemplo
 
 ```
-LLM → find_location({ sku: "ABC-123", qty: 40 })      ← leitura, executa na hora
-    ← [{ location: "A-03-02", free: 20 }, { location: "A-03-04", free: 30 }]
-LLM → submit_plan({ ...plano... })
-    ← { status: "executed", plan_id: 812, summary: "40 cx ABC-123: DOCA-01 → A-03-02 (20), A-03-04 (20)" }
+LLM → search_locations({ zone: "A", min_free: 20 })    ← leitura, executa na hora
+    ← { count: 2, rows: [{ code: "A-03-02", free: 20 }, { code: "A-03-04", free: 30 }] }
+LLM → propose_plan({ title, rationale, assumptions, plan: { ...plano... } })
+    ← { status: "valid", proposals: 1, risk: "reversible" }
+Operador confirma → plano 812 executed: "40 cx ABC-123: DOCA-01 → A-03-02 (20), A-03-04 (20)"
 ```
+
+### Modo proativo
+
+O prompt de sistema (`Core/Planner/Prompts/system.md`) manda o Planner agir como um operador experiente:
+
+- Faz o que o operador poderia fazer pelas operações do catálogo, sem pedir confirmação antes de montar o plano.
+- Faltou informação: assume um valor razoável, lista cada suposição em `assumptions` e, havendo caminhos diferentes, propõe até 3 alternativas.
+- Entidade inexistente (zona, endereço, produto, fornecedor ou cliente): confere com a busca e propõe um plano que a cria antes da movimentação. Os passos se encadeiam, e a validação enxerga os passos anteriores.
+- Pergunta só quando não há padrão razoável, por `offer_options` (1 a 4 opções).
+- Recusa só pedido fora do escopo ou sem direito. Diz quem pode fazer e oferece uma alternativa.
+
+Padrões quando não foi dito: endereço novo no próximo código livre da zona, com a capacidade típica da zona (ou 100); recebimento numa doca ativa com espaço; lote com a data de hoje (`AAAAMMDD`) e o SKU; unidade desconhecida `un`; SKU novo com três letras do nome e o primeiro número livre.
 
 ---
 
@@ -126,18 +139,32 @@ Regras da DSL:
 - **Simulação:** o Simulator executa o plano pelo mesmo código do Executor, dentro de uma transação que sempre termina em `ROLLBACK`. O efeito mostrado na pré-visualização é exatamente o que a execução faria.
 - **Execução:** o Executor revalida tudo dentro de `BEGIN IMMEDIATE`, porque o estoque pode ter mudado desde a simulação. Os movimentos, o status do plano e a auditoria são gravados na mesma transação, tudo ou nada.
 
-### Catálogo inicial de operações (armazém)
+### Catálogo de operações (armazém, DSL v1)
 
 | Operação | Descrição | Risco | Permissão | Estado |
 |----------|-----------|-------|-----------|--------|
 | `receive_goods` | Registra a entrada de itens na doca (zona `DOCA`); lote e validade obrigatórios para produto com validade; pode dar baixa num pedido de entrada | Reversível | `stock.receive` | Implementada |
 | `move_stock` | Transfere saldo disponível (quantidade − reservado) entre endereços do armazém, respeitando a capacidade | Reversível | `stock.move` | Implementada |
-| `reserve_stock` | Reserva saldo para um pedido de saída | Reversível | `stock.reserve` | Feature 4 |
-| `pick_items` | Registra a separação de itens | Reversível | `stock.pick` | Feature 4 |
-| `ship_order` | Expede e baixa o estoque | Crítico | `stock.ship` | Feature 4 |
-| `adjust_stock` | Ajusta saldo por inventário ou avaria (exige motivo); nunca abaixo do reservado | Crítico | `stock.adjust` | Implementada (antecipada da feature 4) |
+| `adjust_stock` | Ajusta saldo por inventário ou avaria (exige motivo); nunca abaixo do reservado | Crítico | `stock.adjust` | Implementada |
 | `create_product` | Cadastra produto; o custo unitário vai cifrado em `unit_cost_enc` | Reversível | `catalog.manage` | Implementada |
-| `create_location` | Cadastra endereço numa zona do armazém | Reversível | `location.manage` | Implementada |
+| `update_product` | Altera dados do produto; custo cifrado; não liga controle de validade com saldo sem lote | Reversível | `catalog.manage` | Implementada |
+| `create_supplier` | Cadastra fornecedor; nome único na tabela e documento opcional, já mascarado | Reversível | `catalog.manage` | Implementada |
+| `create_customer` | Cadastra cliente; nome único na tabela e documento opcional, já mascarado | Reversível | `catalog.manage` | Implementada |
+| `create_zone` | Cadastra zona do armazém; código único por armazém | Reversível | `location.manage` | Implementada |
+| `update_zone` | Renomeia ou (des)ativa zona; zona com saldo não pode ser desativada | Reversível | `location.manage` | Implementada |
+| `create_location` | Cadastra endereço numa zona ativa do armazém | Reversível | `location.manage` | Implementada |
+| `create_location_range` | Cadastra endereços em lote (`ZONA-CC-NN`, por corredor e níveis), tudo ou nada | Reversível | `location.manage` | Implementada |
+| `update_location` | Altera capacidade ou ativa/desativa endereço; capacidade não cai abaixo da ocupação | Reversível | `location.manage` | Implementada |
+| `create_inbound_order` | Pedido de entrada de fornecedor ativo; documento único no armazém | Reversível | `order.manage` | Implementada |
+| `cancel_inbound_order` | Cancela pedido de entrada do armazém, só enquanto nada foi recebido | Crítico | `order.manage` | Implementada |
+| `create_outbound_order` | Pedido de saída de cliente ativo; número único no sistema | Reversível | `order.manage` | Implementada |
+| `reserve_stock` | Reserva saldo para o pedido de saída por FEFO, sem passar do que as linhas ainda pedem | Reversível | `stock.reserve` | Implementada |
+| `release_reservation` | Devolve ao disponível as reservas do pedido que ainda não foram separadas | Reversível | `stock.reserve` | Implementada |
+| `pick_items` | Leva o saldo reservado do pedido a uma doca (movimento `pick`); continua reservado | Reversível | `stock.pick` | Implementada |
+| `ship_order` | Expede pedido totalmente separado; baixa o saldo das docas e as reservas | Crítico | `stock.ship` | Implementada |
+| `cancel_outbound_order` | Cancela pedido ainda não expedido e libera todas as suas reservas | Crítico | `order.manage` | Implementada |
+
+Planos podem encadear passos de criação (`create_zone`, depois `create_location_range`, depois `move_stock`): a validação enxerga os passos anteriores.
 
 O risco do plano é o **maior risco** entre seus passos.
 
@@ -147,38 +174,42 @@ O risco do plano é o **maior risco** entre seus passos.
 
 | Ferramenta | Tipo | Função |
 |------------|------|--------|
-| Consultas de domínio (`get_stock`, `find_location`, `get_order`, `list_pending_receipts`...) | Leitura | Respostas compactas e paginadas |
+| Consultas de domínio (`get_stock`, `search_locations`, `search_orders`, `search_partners`...) | Leitura | Respostas compactas e paginadas |
 | `search_memories` | Leitura | Busca memórias além das já injetadas no contexto |
 | `search_recipes` | Leitura | Busca receitas similares para usar como base |
 | `load_skill` | Leitura | Carrega o `SKILL.md` de uma skill |
-| `submit_plan` | Escrita (via motor) | Única porta de entrada para alterar dados |
+| `propose_plan` | Escrita (via motor, só simula) | Única porta de entrada para alterar dados; nada é gravado antes da confirmação de quem pediu |
 | `remember` | Memória | Registra uma memória candidata (seção 8) |
 
 A skill ativa define quais consultas e quais operações do catálogo ficam disponíveis.
 
-**Implementado na feature 3 (`Core/Planner`):**
-- **Ferramentas de leitura:** `search_products`, `get_product`, `get_stock`, `find_location`, `list_inbound_orders`, `list_outbound_orders` e `submit_plan`. As de memória, receitas e skills chegam nas features 4, 5 e 7.
+**Implementado na feature 3 (`Core/Planner`), redesenhado em 2026-11-08 para o modo proativo:**
+- **Ferramentas de leitura (8):** `search_products`, `get_product`, `get_stock`, `search_locations`, `search_zones`, `search_lots`, `search_orders` e `search_partners`.
   - Cada ferramenta tem JSON Schema próprio (`additionalProperties: false`), validado antes de tocar o banco.
-  - Rodam na conexão de leitura da IA, sempre filtradas pelo armazém da sessão.
+  - Rodam na conexão de leitura da IA (`v_ai_*`), sempre filtradas pelo armazém da sessão.
   - Devolvem no máximo 50 linhas e 8 KB.
-  - Só aparecem as ferramentas permitidas pelo direito IA ∩ usuário.
-- **Pesquisa robusta:** toda entidade que a IA precisa encontrar ganha uma ferramenta de pesquisa, não só busca por chave exata.
-  - `search_products` aceita nome, descrição ou SKU completo ou parcial (`ABC`, `abc123`), ou nenhum argumento para listar tudo.
-  - Ignora maiúsculas e acentos e exige todos os termos.
-  - Filtra por saldo no armazém (`has_stock`), controle de validade e unidade.
-  - Ordena por relevância e pagina com `limit`/`offset`, devolvendo `total` e `has_more`.
-  - O texto do usuário vira só parâmetros: `%` e `_` separam termos e nunca viram curinga.
+  - Exigem `stock.read`.
+- **Propostas:** `propose_plan` recebe título, justificativa, suposições e o plano DSL v1.
+  - Só existe se o direito efetivo tiver `plan.submit`; as operações oferecidas no prompt e no schema são as do direito IA ∩ usuário.
+  - Um plano inválido volta como `[{step, field, code, message}]` e conta como tentativa.
+  - Um plano válido é simulado e vira **proposta**. Podem ser até **3 alternativas** válidas, cada uma com título, justificativa e suposições.
+  - Nada é gravado: a confirmação de quem pediu executa a proposta escolhida.
+- **Opções:** `offer_options` mostra de 1 a 4 botões (rótulo até 60 caracteres, pedido completo até 300). Ao clicar, o pedido é enviado como se tivesse sido digitado.
+- **Pesquisa robusta:** toda entidade que a IA precisa encontrar tem ferramenta de pesquisa, não só busca por chave exata.
+  - O texto livre aceita parte do nome, da descrição, do código ou do SKU; ignora maiúsculas e acentos e exige todos os termos.
+  - Filtros por entidade: saldo no armazém, validade, unidade, zona, corredor, espaço livre, ativo ou inativo, vencimento e tipo de parceiro.
+  - Paginação com `limit` (máximo 50) e `offset`, com `total` e `has_more`.
+  - O texto do usuário vira só parâmetro: `%` e `_` nunca viram curinga.
+  - `search_locations` com `zone` devolve também `next_free_codes` (próximos 5 códigos livres, únicos no sistema) e `typical_capacity`.
   - O custo unitário nunca é lido.
 - **Delimitação:** o resultado de cada ferramenta volta ao LLM entre `<dados fonte="tool:…">…</dados>`, com `<` e `>` escapados, e o prompt de sistema manda tratá-lo como dado.
 - **Auditoria:** cada chamada é auditada como `ai.tool` (permitida ou negada), em nome do usuário.
-- **`submit_plan`:** só chama a prévia do motor (`Preview` com origem `ai`) e não grava nada.
-  - Um plano inválido volta como `[{step, field, code, message}]`.
-  - Um plano válido encerra o laço e vira a **proposta** do chat.
 - **Limites por pedido:**
-  - 3 planos inválidos;
-  - 8 rodadas com o LLM e até 8 chamadas de ferramenta por rodada;
+  - 4 planos inválidos;
+  - 12 rodadas com o LLM e até 8 chamadas de ferramenta por rodada;
+  - 3 propostas válidas;
   - 8.192 tokens por chamada e 60.000 por pedido;
-  - ao estourar um limite, a tarefa é **escalada** ao operador.
+  - ao estourar um limite, a tarefa é **escalada** ao operador, exceto quando já há propostas válidas: essas são entregues.
 - **Histórico:** os últimos 10 pedidos e respostas da sessão ficam só em memória, nunca no banco.
 
 ---
@@ -292,6 +323,7 @@ Experimento para reduzir custo e dependência de rede na etapa mais frequente: t
 |-------|----------|
 | Domínio | Produtos, endereços, saldos, lotes, fornecedores, clientes, pedidos de entrada e saída |
 | Livro-razão | `stock_movements`: uma linha por mudança de estoque, nunca alterada nem apagada |
+| Reservas | `order_reservations`: uma linha por parte da reserva de um pedido de saída, com estado `reserved`, `picked`, `shipped` ou `released`; quantidade imutável e sem `DELETE` |
 | Planos | Plano JSON, status (`validating`, `pending_approval`, `rejected`, `executed`, `failed`), diff simulado, tentativas, aprovador, quem rejeitou e o motivo (`rejected_by`, `rejection_reason`), causa da falha (`failure_reason`) |
 | Receitas | Plano parametrizado, parâmetros, versões da DSL e da skill, estatísticas de uso e falha |
 | Memórias | Tabela `memories` + índice FTS5 |
@@ -299,7 +331,7 @@ Experimento para reduzir custo e dependência de rede na etapa mais frequente: t
 | Acesso | `roles`, `role_permissions` (ALLOW/DENY), `users` |
 | Auditoria | `audit_log` encadeado por hash |
 
-O schema está em `db/schema.sql` e as regras de banco em `db/security.sql`. Toda execução de plano roda numa única transação SQLite.
+O schema está em `db/schema.sql` e as regras de banco em `db/security.sql`. Toda execução de plano roda numa única transação SQLite. A versão atual é a 4 (`PRAGMA user_version`); bancos antigos sobem pelas migrações de `db/migrations/` (002, 003 e 004).
 
 ---
 
@@ -355,7 +387,9 @@ A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DA
 - **Escopo por linha (equivalente a RLS):** toda consulta da aplicação recebe o `warehouse_id` do usuário como parâmetro; um usuário nunca lê nem altera dados de outro armazém.
 - **A IA age em nome de alguém:** o direito efetivo da IA é a **interseção** entre o papel `agente_ia` e o papel de quem fez o pedido. Ela nunca tem mais permissão do que a pessoa.
   - O motor aplica a interseção a todo plano com `planned_by = 'ai'`: na prévia, no envio e de novo na aprovação.
-  - Pelo seed, a IA não tem `stock.adjust` (DENY) nem `location.manage`. Ajustes e cadastro de endereço são feitos pela tela "Novo plano".
+  - Desde 2026-11-08 (decisão do product owner, migração 003), a IA tem os mesmos direitos operacionais do usuário: recebimento, movimentação, reserva, separação, expedição, ajuste, cadastros e pedidos.
+  - Riscos aceitos e mitigados: toda proposta exige **Confirmar** de quem pediu; planos críticos exigem outro supervisor; a interseção impede que a IA faça o que a pessoa não pode. Detalhes em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 3.1.
+  - Continuam proibidos para a IA: aprovar ou rejeitar plano, ler dados sensíveis, gerir usuários e papéis, ler a auditoria e promover receitas (a escalonamento é bloqueado por trigger e os `DENY` não podem ser removidos).
 - **Segregação de funções:** quem pede uma operação crítica não pode aprová-la, e a IA nunca aprova.
 - A matriz completa de papéis, com os pontos de `DENY`, está em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md).
 
@@ -386,7 +420,8 @@ No policy engine (`Core/Policy`):
 - **Triggers de banco** (`db/security.sql`) bloqueiam com `RAISE(ABORT, 'DENY: ...')`:
   - UPDATE e DELETE em `audit_log` e `stock_movements`;
   - alteração de planos finalizados e exclusão de qualquer plano;
-  - concessão de permissões proibidas ao papel da IA e remoção dos seus `DENY`;
+  - concessão de `plan.approve`, `user.manage`, `role.manage`, `sensitive.read` e `audit.read` ao papel da IA, e remoção dos seus `DENY`;
+  - `order_reservations` sem `DELETE`, e `UPDATE` só nas transições `reserved → picked → shipped` e `reserved`/`picked → released`, com quantidade e identidade imutáveis;
   - aprovação ou rejeição de plano pela IA ou pelo próprio solicitante, e plano ao mesmo tempo aprovado e rejeitado.
 - **Auditoria encadeada:** cada linha de `audit_log` guarda o hash SHA-256 da linha anterior. Um job verifica a cadeia ao iniciar o app e periodicamente; qualquer quebra gera alerta ao administrador.
   - **Regra v1 do hash:** `hash` = SHA-256 em hexadecimal minúsculo dos bytes UTF-8 de
@@ -404,7 +439,7 @@ Camadas, da mais externa para a mais interna:
 
 1. **Conteúdo é dado, não instrução:** descrições de produtos, documentos do RAG, memórias e resultados de ferramentas entram no prompt dentro de blocos delimitados e marcados como dados de referência. O prompt de sistema diz explicitamente que instruções dentro desses blocos devem ser ignoradas e relatadas.
 2. **Ferramentas limitadas pela skill:** a IA só vê as ferramentas da skill ativa.
-3. **Sem SQL e sem escrita direta:** a única forma de alterar dados é `submit_plan`, com operações de um catálogo fechado.
+3. **Sem SQL e sem escrita direta:** a única forma de alterar dados é `propose_plan`, com operações de um catálogo fechado, executadas só depois da confirmação de quem pediu.
 4. **Validação determinística:** schema, regras de negócio e permissões (interseção IA ∩ usuário) são checados pelo código.
 5. **Aprovação humana** para todo plano de risco crítico, com o diff simulado em linguagem de negócio.
 6. **Banco:** mesmo que tudo acima falhe, a conexão da IA é somente leitura e os triggers bloqueiam as escritas proibidas.
@@ -424,5 +459,6 @@ Camadas, da mais externa para a mais interna:
 
 ### 12.11 Testes de segurança
 
-- `db/tests/test_db.py`: imutabilidade, escalonamento de privilégio, interseção IA ∩ usuário, *authorizer* da IA, SQL injection e otimização.
+- `db/tests/test_db.py`: imutabilidade, escalonamento de privilégio, interseção IA ∩ usuário, *authorizer* da IA, SQL injection, otimização, migrações 2 → 3 → 4 e reservas (`MigrationTo3Tests`, `MigrationTo4Tests`, `ReservationTests`).
+- Testes do app em `tests/Nexus.Tests`: catálogo (`CatalogOperationTests`, `OrderOperationTests`), pesquisa (`SearchToolsTests`), propostas da IA (`ProposePlanTests`) e migrações (`MigrationTests`).
 - Suíte de ataques de prompt injection e de SQL injection descrita em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), com métricas.

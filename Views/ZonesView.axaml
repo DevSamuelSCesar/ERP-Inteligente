@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.ZonesView"
+             x:DataType="vm:ZonesViewModel">
+
+    <!-- Read-only query screen: filter, totals strip, DataGrid (references/UI.md, section 7) -->
+    <Grid RowDefinitions="Auto,Auto,*">
+        <TextBox Grid.Row="0" Width="400" HorizontalAlignment="Left"
+                 Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
+        <StackPanel Grid.Row="1" Margin="0,12,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}">
+            <DataGrid.Columns>
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Zona" Binding="{Binding Code}" Width="90" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Nome" Binding="{Binding Name}" Width="*" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Situação" Binding="{Binding StatusText}" Width="110" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Endereços" Binding="{Binding Locations}" Width="110" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Capacidade" Binding="{Binding Capacity}" Width="110" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Ocupado" Binding="{Binding Occupied}" Width="100" />
+                <DataGridTextColumn x:DataType="m:ZoneRow" Header="Livre" Binding="{Binding Free}" Width="100" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

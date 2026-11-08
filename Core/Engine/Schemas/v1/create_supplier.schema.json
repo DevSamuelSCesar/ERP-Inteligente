@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_supplier",
+  "description": "Cadastra um fornecedor. O nome não pode repetir o de outro fornecedor (maiúsculas e minúsculas contam como iguais).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "minLength": 1, "maxLength": 120, "description": "Nome ou razão social." },
+    "document_masked": { "type": "string", "pattern": "^(?=[^*]*[*])[0-9*./\\-]{1,20}$", "maxLength": 20, "description": "Documento já mascarado (**.***.***/0001-**): só dígitos, asteriscos e pontuação, com ao menos um asterisco. Nunca o documento completo." }
+  }
+}

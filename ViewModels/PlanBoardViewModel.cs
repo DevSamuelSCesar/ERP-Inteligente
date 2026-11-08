@@ -126,8 +126,28 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
         PlanOperation.AdjustStock => new("Ajuste", $"{step.Quantity:+0;-0;0} {step.Unit}", step.Sku, step.From ?? "", "", step.Note ?? ""),
         PlanOperation.CreateProduct => new("Cadastro de produto", "", step.Sku, "", "", $"{step.Note} ({step.Unit})"),
         PlanOperation.CreateLocation => new("Cadastro de endereço", $"cap. {step.Quantity}", "", $"zona {step.From}", step.To ?? "", ""),
+        PlanOperation.CreateZone => new("Cadastro de zona", "", "", $"zona {step.From}", "", step.Note ?? ""),
+        PlanOperation.UpdateZone => new("Alteração de zona", "", "", $"zona {step.From}", "", step.Note ?? ""),
+        PlanOperation.CreateLocationRange => new("Cadastro de endereços", $"cap. {step.Quantity} cada", "", $"zona {step.From}", step.To ?? "", ""),
+        PlanOperation.UpdateLocation => new("Alteração de endereço", "", "", step.From ?? "", "", step.Note ?? ""),
+        PlanOperation.UpdateProduct => new("Alteração de produto", "", step.Sku, "", "", step.Note ?? ""),
+        PlanOperation.CreateSupplier => new("Cadastro de fornecedor", "", "", "", "", Partner(step)),
+        PlanOperation.CreateCustomer => new("Cadastro de cliente", "", "", "", "", Partner(step)),
+        PlanOperation.CreateInboundOrder => new("Pedido de entrada", Lines(step.Quantity), "", step.From ?? "", step.To ?? "", step.Note ?? ""),
+        PlanOperation.CancelInboundOrder => new("Cancelamento de pedido de entrada", "", "", step.From ?? "", "", step.Note ?? ""),
+        PlanOperation.CreateOutboundOrder => new("Pedido de saída", Lines(step.Quantity), "", step.From ?? "", step.To ?? "", step.Note ?? ""),
+        PlanOperation.ReserveStock => new("Reserva de estoque", "", "", $"pedido {step.From}", "", step.Note ?? ""),
+        PlanOperation.ReleaseReservation => new("Liberação de reserva", "", "", $"pedido {step.From}", "", step.Note ?? ""),
+        PlanOperation.PickItems => new("Separação", "", "", $"pedido {step.From}", step.To ?? "", step.Note ?? ""),
+        PlanOperation.ShipOrder => new("Expedição", "", "", $"pedido {step.From}", "", ""),
+        PlanOperation.CancelOutboundOrder => new("Cancelamento de pedido de saída", "", "", $"pedido {step.From}", "", step.Note ?? ""),
         _ => new(step.Operation.ToString(), $"{step.Quantity} {step.Unit}", step.Sku, step.From ?? "", step.To ?? "", step.Note ?? ""),
     };
+
+    private static string Lines(int count) => count == 1 ? "1 linha" : $"{count} linhas";
+
+    private static string Partner(PlanStep step) =>
+        string.IsNullOrEmpty(step.To) ? step.Note ?? "" : $"{step.Note} ({step.To})";
 
     private static string Lot(string? lot) => string.IsNullOrEmpty(lot) ? "" : $"lote {lot}";
 }

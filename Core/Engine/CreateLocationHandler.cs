@@ -14,9 +14,12 @@ internal sealed class CreateLocationHandler : IOperationHandler
     public IReadOnlyList<PlanError> Validate(EngineContext ctx, PlanStepDocument step, JsonObject args)
     {
         var errors = new List<PlanError>();
-        var zone = Str(args, "zone");
-        if (FindZone(ctx, zone) is null)
-            errors.Add(Error(step, "zone", "business.unknown_zone", $"a zona {zone} não existe neste armazém."));
+        var zoneCode = Str(args, "zone");
+        var zone = StructureStore.FindZone(ctx, zoneCode);
+        if (zone is null)
+            errors.Add(Error(step, "zone", "business.unknown_zone", $"a zona {zoneCode} não existe neste armazém."));
+        else if (!zone.IsActive)
+            errors.Add(Error(step, "zone", "business.inactive_zone", $"a zona {zone.Code} está desativada."));
         var code = Str(args, "code");
         using var cmd = ctx.Command("SELECT 1 FROM locations WHERE code = $code");
         cmd.Parameters.AddWithValue("$code", code ?? string.Empty);
@@ -29,7 +32,7 @@ internal sealed class CreateLocationHandler : IOperationHandler
     {
         var code = Str(args, "code") ?? throw new InvalidOperationException("Missing code.");
         var zone = Str(args, "zone");
-        var zoneId = FindZone(ctx, zone) ?? throw new InvalidOperationException("Step applied without validation.");
+        var zoneId = StructureStore.FindZone(ctx, zone)?.Id ?? throw new InvalidOperationException("Step applied without validation.");
         var capacity = Int(args, "capacity") ?? throw new InvalidOperationException("Missing capacity.");
         using var insert = ctx.Command("INSERT INTO locations (zone_id, code, capacity) VALUES ($zone, $code, $cap)");
         insert.Parameters.AddWithValue("$zone", zoneId);
@@ -38,14 +41,5 @@ internal sealed class CreateLocationHandler : IOperationHandler
         insert.ExecuteNonQuery();
         ctx.Diff.AddCreated("Endereço", code, $"zona {zone}, capacidade {capacity.ToString(CultureInfo.InvariantCulture)}");
         return code;
-    }
-
-    private static long? FindZone(EngineContext ctx, string? code)
-    {
-        if (code is null) return null;
-        using var cmd = ctx.Command("SELECT id FROM zones WHERE code = $code AND warehouse_id = $wh");
-        cmd.Parameters.AddWithValue("$code", code);
-        cmd.Parameters.AddWithValue("$wh", ctx.WarehouseId);
-        return cmd.ExecuteScalar() is long id ? id : null;
     }
 }

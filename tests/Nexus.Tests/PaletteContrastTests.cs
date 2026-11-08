@@ -21,6 +21,9 @@ public partial class PaletteContrastTests
         { "OnStatus", "StatusSuccess", 4.5 }, { "OnStatus", "StatusWarning", 4.5 },
         { "Data1", "Surface", 3 }, { "Data2", "Surface", 3 }, { "Data3", "Surface", 3 }, { "Data4", "Surface", 3 }, { "Data5", "Surface", 3 },
         { "Data1", "Background", 3 }, { "Data5", "Background", 3 },
+        // Highlighted entities in the Nexus answers are text: 4.5:1 on the transcript and on boards (UI.md, 4.2).
+        { "Data1", "Background", 4.5 }, { "Data2", "Background", 4.5 }, { "Data3", "Background", 4.5 }, { "Data4", "Background", 4.5 },
+        { "Data1", "Surface", 4.5 }, { "Data2", "Surface", 4.5 }, { "Data3", "Surface", 4.5 }, { "Data4", "Surface", 4.5 },
     };
 
     [Theory]

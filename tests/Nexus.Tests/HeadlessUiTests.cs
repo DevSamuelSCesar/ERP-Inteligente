@@ -54,7 +54,12 @@ public class HeadlessUiTests
         await nexus.SendCommand.ExecuteAsync(null);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Contains(window.GetVisualDescendants().OfType<SelectableTextBlock>(), t => t.Text == "ABC-123: 40 cx em DOCA-01.");
+        var answer = Assert.Single(window.GetVisualDescendants().OfType<SelectableTextBlock>(),
+            t => string.Concat(t.Inlines?.OfType<Avalonia.Controls.Documents.Run>().Select(r => r.Text) ?? []) == "ABC-123: 40 cx em DOCA-01.");
+        // Entities are highlighted runs: the SKU and the location use the data palette, not the default text brush.
+        var runs = answer.Inlines!.OfType<Avalonia.Controls.Documents.Run>().ToList();
+        Assert.NotNull(runs.Single(r => r.Text == "ABC-123").Foreground);
+        Assert.NotNull(runs.Single(r => r.Text == "DOCA-01").Foreground);
         Assert.DoesNotContain(window.GetVisualDescendants(), v => v is PlanBoardView or DraftPlanView);
         window.Close();
     }
@@ -64,9 +69,9 @@ public class HeadlessUiTests
     public async Task Nexus_proposal_is_written_only_after_confirmation()
     {
         const string plan =
-            "{\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" +
+            "{\"title\":\"Guardar\",\"rationale\":\"Move da doca.\",\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" +
             "{\"op\":\"move_stock\",\"args\":{\"sku\":\"ABC-123\",\"qty\":40,\"from\":\"DOCA-01\",\"to\":\"A-02-01\"}}]}}";
-        var llm = new ScriptedLlmProvider().Call("submit_plan", plan);
+        var llm = new ScriptedLlmProvider().Call("propose_plan", plan).Reply("Plano pronto.");
         using var app = new TestApp(llm: llm);
         var shell = await app.ShellForAsync("op.joao");
         var window = new MainWindow { DataContext = shell };

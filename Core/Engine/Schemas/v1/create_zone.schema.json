@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_zone",
+  "description": "Cadastra uma zona do armazém (agrupa endereços). O código não pode já existir no armazém.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "name"],
+  "properties": {
+    "code": { "type": "string", "pattern": "^[A-Z]{1,4}$", "maxLength": 4, "description": "Código da zona: de 1 a 4 letras maiúsculas (Q). Vira o prefixo dos endereços." },
+    "name": { "type": "string", "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "minLength": 1, "maxLength": 80, "description": "Nome da zona (Quarentena), em texto simples." }
+  }
+}

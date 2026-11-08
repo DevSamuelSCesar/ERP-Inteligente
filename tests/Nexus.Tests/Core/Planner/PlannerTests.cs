@@ -76,7 +76,10 @@ public sealed class PlannerTests : IDisposable
     private static LlmToolCall Call(string name, string args, string id = "c1") => new(id, name, args);
 
     private static string PlanArgs(params string[] steps) =>
-        "{\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" + string.Join(",", steps) + "]}}";
+        "{\"title\":\"Guardar\",\"rationale\":\"Atende ao pedido.\",\"assumptions\":[\"endereço A-02-01\"],\"plan\":" + PlanDoc(steps) + "}";
+
+    private static string PlanDoc(params string[] steps) =>
+        "{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" + string.Join(",", steps) + "]}";
 
     private static string Move(string sku, int qty, string from, string to) => EngineHarness.Move(sku, qty, from, to);
 
@@ -183,9 +186,9 @@ public sealed class PlannerTests : IDisposable
     {
         _llm.Enqueue(Calls(
                 Call("get_product", "{\"sku\":\"ABC-123\"}", "a"),
-                Call("find_location", "{\"zone\":\"A\",\"min_free\":50}", "b"),
-                Call("list_inbound_orders", "{\"status\":\"expected\"}", "c"),
-                Call("list_outbound_orders", "{}", "d")))
+                Call("search_locations", "{\"zone\":\"a\",\"min_free\":50,\"active\":true}", "b"),
+                Call("search_orders", "{\"kind\":\"inbound\",\"status\":\"expected\"}", "c"),
+                Call("search_orders", "{\"kind\":\"outbound\"}", "d")))
             .Enqueue(Text("pronto"));
         var status = new Status();
         await Run(NewPlanner(), _joao, "consulte", status: status);
@@ -193,12 +196,13 @@ public sealed class PlannerTests : IDisposable
         var tools = _llm.Requests[1].Messages.Where(m => m.Role == LlmRole.Tool).Select(m => m.Content!).ToList();
         Assert.Contains("Caixa de parafusos 4mm", tools[0]);
         Assert.Contains("\"free\":", tools[1]);
+        Assert.Contains("\"next_free_codes\":", tools[1]);
         Assert.Contains("A-02-04", tools[1]);
         Assert.DoesNotContain("DOCA-01", tools[1]);
         Assert.Contains("NF-FICT-000102", tools[2]);
         Assert.DoesNotContain("NF-FICT-000101", tools[2]);
         Assert.Contains("PED-FICT-5001", tools[3]);
-        Assert.Contains("Procurando endereços livres", status.Lines);
+        Assert.Contains("Pesquisando endereços da zona A", status.Lines);
         Assert.All(tools, t => Assert.StartsWith("<dados fonte=\"tool:", t));
     }
 
@@ -228,7 +232,7 @@ public sealed class PlannerTests : IDisposable
         Assert.True(doc.RootElement.GetProperty("rows").GetArrayLength() <= PlannerTools.MaxRows);
     }
 
-    // ---- submit_plan --------------------------------------------------------------------------------------
+    // ---- propose_plan --------------------------------------------------------------------------------------
 
     [Fact]
     public async Task Valid_plan_after_a_read_becomes_a_proposal_and_writes_nothing()
@@ -236,20 +240,26 @@ public sealed class PlannerTests : IDisposable
         var before = (Plans: _f.Scalar("SELECT COUNT(*) FROM plans"), Stock: _f.Scalar("SELECT SUM(quantity) FROM stock_balances"),
             Moves: _f.Scalar("SELECT COUNT(*) FROM stock_movements"));
         _llm.Enqueue(Calls(Call("get_stock", "{\"location\":\"DOCA-01\"}")))
-            .Enqueue(new LlmResponse("Movi para o A-02-01.", [Call("submit_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "A-02-01")))],
-                "r", LlmFinishReason.ToolCalls, new LlmUsage(10, 10)));
+            .Enqueue(Calls(Call("propose_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "A-02-01")))))
+            .Enqueue(new LlmResponse("Movi para o A-02-01.", [], "r", LlmFinishReason.Stop, new LlmUsage(10, 10)));
         var status = new Status();
         var (result, turn) = await Run(NewPlanner(), _joao, "guarde 10 do ABC-123", status: status);
 
-        var proposal = Assert.IsType<PlannerProposal>(result);
+        var proposals = Assert.IsType<PlannerProposals>(result);
+        var proposal = Assert.Single(proposals.Items);
+        Assert.Equal("Guardar", proposal.Title);
+        Assert.Equal("Atende ao pedido.", proposal.Rationale);
+        Assert.Equal(["endereço A-02-01"], proposal.Assumptions);
         Assert.Equal(PlanOrigin.Ai, proposal.Draft.Origin);
         Assert.Empty(proposal.Preview.Errors);
         Assert.NotNull(proposal.Preview.Diff);
         Assert.Contains("move_stock", proposal.Draft.Json);
-        Assert.Equal("Movi para o A-02-01.", proposal.Text);
+        Assert.Equal("Movi para o A-02-01.", proposals.Text);
+        Assert.Empty(proposals.Options);
         Assert.NotNull(turn);
         Assert.Empty(turn.Reply.ToolCalls);
         Assert.Equal("r", turn.Reply.ReasoningContent);
+        Assert.Contains("\"status\":\"valid\"", LastToolResult());
         Assert.Contains("Validando o plano", status.Lines);
 
         Assert.Equal(before.Plans, _f.Scalar("SELECT COUNT(*) FROM plans"));
@@ -260,20 +270,21 @@ public sealed class PlannerTests : IDisposable
     [Fact]
     public async Task Plan_given_as_a_json_string_is_accepted()
     {
-        var plan = JsonSerializer.Serialize(new { plan = PlanArgs(Move("ABC-123", 10, "DOCA-01", "A-02-01")) is var p ? JsonDocument.Parse(p).RootElement.GetProperty("plan").GetRawText() : "" });
-        _llm.Enqueue(Calls(Call("submit_plan", plan)));
+        var plan = JsonSerializer.Serialize(new { title = "Guardar", rationale = "Atende.", plan = PlanDoc(Move("ABC-123", 10, "DOCA-01", "A-02-01")) });
+        _llm.Enqueue(Calls(Call("propose_plan", plan))).Enqueue(Text("pronto"));
         var (result, _) = await Run(NewPlanner(), _joao, "mova");
-        Assert.IsType<PlannerProposal>(result);
+        Assert.Single(Assert.IsType<PlannerProposals>(result).Items);
     }
 
     [Fact]
     public async Task Invalid_plan_then_corrected_gives_a_proposal()
     {
-        _llm.Enqueue(Calls(Call("submit_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "Q-99-99")))))
-            .Enqueue(Calls(Call("submit_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "A-02-01")), "c2")));
+        _llm.Enqueue(Calls(Call("propose_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "Q-99-99")))))
+            .Enqueue(Calls(Call("propose_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "A-02-01")), "c2")))
+            .Enqueue(Text("pronto"));
         var (result, _) = await Run(NewPlanner(), _joao, "mova");
 
-        Assert.IsType<PlannerProposal>(result);
+        Assert.Single(Assert.IsType<PlannerProposals>(result).Items);
         var feedback = _llm.Requests[1].Messages.Last(m => m.Role == LlmRole.Tool).Content!;
         Assert.Contains("\"status\":\"invalid\"", feedback);
         Assert.Contains("\"step\":0", feedback);
@@ -282,23 +293,25 @@ public sealed class PlannerTests : IDisposable
     }
 
     [Fact]
-    public async Task Three_invalid_plans_escalate()
+    public async Task Four_invalid_plans_escalate()
     {
-        var bad = Call("submit_plan", PlanArgs(Move("ABC-123", 10, "DOCA-01", "Q-99-99")));
-        _llm.Enqueue(Calls(bad with { Id = "1" })).Enqueue(Calls(bad with { Id = "2" })).Enqueue(Calls(bad with { Id = "3" }));
+        // Each attempt differs, otherwise it would be rejected as a duplicate (still counted, but for another reason).
+        for (var i = 1; i <= 4; i++)
+            _llm.Enqueue(Calls(Call("propose_plan", PlanArgs(Move("ABC-123", i, "DOCA-01", "Q-99-99")), "c" + i)));
         var (result, turn) = await Run(NewPlanner(), _joao, "mova");
 
-        Assert.Contains("3 tentativas", Assert.IsType<PlannerEscalated>(result).Reason);
+        Assert.Contains("4 tentativas", Assert.IsType<PlannerEscalated>(result).Reason);
         Assert.Null(turn);
-        Assert.Equal(3, _llm.Requests.Count);
+        Assert.Equal(4, _llm.Requests.Count);
     }
 
     [Fact]
-    public async Task Plan_with_adjust_stock_for_a_supervisor_is_invalid_because_the_ai_lacks_the_right()
+    public async Task Plan_with_adjust_stock_for_an_operator_is_invalid_because_the_requester_lacks_the_right()
     {
+        // Since migration 003 the AI role holds stock.adjust, but the effective right is still AI ∩ requester.
         var adjust = PlanArgs(EngineHarness.Adjust("ABC-123", -1, "A-01-01"));
-        _llm.Enqueue(Calls(Call("submit_plan", adjust))).Enqueue(Text("não posso"));
-        var (result, _) = await Run(NewPlanner(), _maria, "ajuste");
+        _llm.Enqueue(Calls(Call("propose_plan", adjust))).Enqueue(Text("não posso"));
+        var (result, _) = await Run(NewPlanner(), _joao, "ajuste");
 
         Assert.IsType<PlannerAnswer>(result);
         var feedback = _llm.Requests[1].Messages.Last(m => m.Role == LlmRole.Tool).Content!;
@@ -389,9 +402,11 @@ public sealed class PlannerTests : IDisposable
         await Run(NewPlanner(), _f.SessionFor("aud.lucia"), "x");
 
         var joao = _llm.Requests[0].Tools;
-        Assert.Contains(joao, t => t.Name == "submit_plan");
-        Assert.Equal(PlannerTools.ReadToolNames.Length + 1, joao.Count);
-        var ops = JsonDocument.Parse(joao.Single(t => t.Name == "submit_plan").ParametersSchema)
+        Assert.Contains(joao, t => t.Name == "propose_plan");
+        Assert.Contains(joao, t => t.Name == "offer_options");
+        Assert.DoesNotContain(joao, t => t.Name is "submit_plan" or "find_location" or "list_inbound_orders");
+        Assert.Equal(PlannerTools.ReadToolNames.Length + 2, joao.Count);
+        var ops = JsonDocument.Parse(joao.Single(t => t.Name == "propose_plan").ParametersSchema)
             .RootElement.GetProperty("properties").GetProperty("plan").GetProperty("properties").GetProperty("steps")
             .GetProperty("items").GetProperty("properties").GetProperty("op").GetProperty("enum")
             .EnumerateArray().Select(e => e.GetString()).ToList();
@@ -401,14 +416,15 @@ public sealed class PlannerTests : IDisposable
         Assert.Contains("adjust_stock", _llm.Requests[0].Messages[0].Content);
 
         var lucia = _llm.Requests[1].Tools;
-        Assert.DoesNotContain(lucia, t => t.Name == "submit_plan");
+        Assert.DoesNotContain(lucia, t => t.Name == "propose_plan");
+        Assert.Contains(lucia, t => t.Name == "offer_options");
         Assert.All(joao.Concat(lucia), t => Assert.True(JsonDocument.Parse(t.ParametersSchema).RootElement.TryGetProperty("type", out _)));
     }
 
     [Fact]
-    public async Task Submit_plan_without_the_right_is_refused_even_if_the_model_calls_it()
+    public async Task Propose_plan_without_the_right_is_refused_even_if_the_model_calls_it()
     {
-        _llm.Enqueue(Calls(Call("submit_plan", PlanArgs(Move("ABC-123", 1, "DOCA-01", "A-02-01"))))).Enqueue(Text("ok"));
+        _llm.Enqueue(Calls(Call("propose_plan", PlanArgs(Move("ABC-123", 1, "DOCA-01", "A-02-01"))))).Enqueue(Text("ok"));
         var (result, _) = await Run(NewPlanner(), _f.SessionFor("aud.lucia"), "x");
 
         Assert.IsType<PlannerAnswer>(result);
@@ -494,7 +510,8 @@ public sealed class PlannerTests : IDisposable
         // The AI authorizer throws on any sensitive column or non-v_ai_ table; a clean run through every read tool proves none is used.
         _llm.Enqueue(Calls(
                 Call("get_product", "{\"sku\":\"ABC-123\"}", "a"), Call("get_stock", "{\"sku\":\"ABC-123\",\"location\":\"A-01-01\"}", "b"),
-                Call("find_location", "{}", "c"), Call("list_inbound_orders", "{}", "d"), Call("list_outbound_orders", "{\"status\":\"open\"}", "e")))
+                Call("search_locations", "{\"zone\":\"A\"}", "c"), Call("search_orders", "{}", "d"), Call("search_orders", "{\"status\":\"open\"}", "e"),
+                Call("search_zones", "{}", "f"), Call("search_lots", "{}", "g"), Call("search_partners", "{}", "h")))
             .Enqueue(Text("ok"));
         await Run(NewPlanner(), _joao, "x");
 

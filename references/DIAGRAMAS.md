@@ -66,7 +66,7 @@ flowchart TB
     PL --> HYB --> AIDATA
     CHK --> EMB --> AIDATA
     EMB <--> OAI
-    PL -- "submit_plan" --> VAL
+    PL -- "propose_plan" --> VAL
     VAL -- "erro estruturado" --> PL
     VAL --> SIM
     SIM -- "crítico" --> PREV --> APRV --> EXE
@@ -144,25 +144,28 @@ sequenceDiagram
     RM->>PL: planejar
     PL->>T: load_skill("armazenagem")
     T-->>PL: SKILL.md
-    PL->>T: find_location(ABC-123, 40)
+    PL->>T: search_locations(zona A, livre ≥ 20)
     T->>DB: SELECT parametrizado em v_ai_* (conexão read-only)
     DB-->>T: A-03-02 (20 livres), A-03-04 (30 livres)
     T-->>PL: resultado compacto
-    PL->>M: submit_plan(plano JSON)
+    PL->>M: propose_plan(título, justificativa, suposições, plano)
 
     loop Até ser válido ou atingir o limite de tentativas
         M->>M: validar (schema + regras + permissões)
         alt Inválido
             M-->>PL: erro estruturado
-            PL->>M: submit_plan(plano corrigido)
+            PL->>M: propose_plan(plano corrigido)
         end
     end
 
     M->>M: simular (diff de estoque + risco)
+    M-->>UI: proposta (nada gravado)
+    UI-->>OP: mostra o efeito
+    OP-->>UI: Confirmar
 
     alt Risco crítico
         M->>UI: pré-visualização em linguagem de negócio
-        UI->>OP: precisa de um supervisor
+        UI->>OP: precisa de outro supervisor (diferente de quem pediu)
         OP-->>UI: supervisor aprova
         UI-->>M: aprovado (supervisor ≠ solicitante)
     end
@@ -180,7 +183,7 @@ Os estados em inglês correspondem ao campo `plans.status`.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> validating: submit_plan
+    [*] --> validating: propose_plan
     validating --> validating: inválido, nova tentativa do LLM
     validating --> rejected: limite de tentativas ou sem permissão
     validating --> Simulando: válido
@@ -231,6 +234,9 @@ erDiagram
     CUSTOMERS ||--o{ OUTBOUND_ORDERS : "pede"
     PLANS |o--o{ MEMORIES : "origina"
     USERS |o--o{ AUDIT_LOG : "age"
+    OUTBOUND_ORDER_LINES ||--o{ ORDER_RESERVATIONS : "reserva"
+    STOCK_BALANCES ||--o{ ORDER_RESERVATIONS : "reserva saldo"
+    PLANS |o--o{ ORDER_RESERVATIONS : "cria ou move"
 
     PRODUCTS {
         int id PK "P"
@@ -282,5 +288,10 @@ erDiagram
         text kind "I"
         text content "I"
         real confidence "I"
+    }
+    ORDER_RESERVATIONS {
+        int id PK "I"
+        int quantity "I"
+        text state "I"
     }
 ```

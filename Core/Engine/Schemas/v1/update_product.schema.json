@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update_product",
+  "description": "Altera dados de um produto já cadastrado. Informe ao menos um campo além do SKU. O custo unitário é guardado cifrado. Ligar o controle de validade é recusado se houver saldo sem lote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sku"],
+  "minProperties": 2,
+  "properties": {
+    "sku": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{3}-[0-9]{3}$", "maxLength": 7 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "SKU do produto (ABC-123) ou referência a um passo anterior." },
+    "name": { "type": "string", "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "minLength": 1, "maxLength": 120, "description": "Novo nome do produto." },
+    "description": { "type": "string", "maxLength": 500, "description": "Nova descrição (vazio apaga)." },
+    "unit": { "type": "string", "pattern": "^[a-z]{1,4}$", "maxLength": 4, "description": "Nova unidade de medida (un, kg, cx)." },
+    "weight_kg": { "type": "number", "minimum": 0, "maximum": 10000, "description": "Novo peso em kg." },
+    "tracks_expiry": { "type": "boolean", "description": "Se o produto passa a controlar validade." },
+    "unit_cost": { "type": "number", "minimum": 0, "maximum": 1000000000, "description": "Novo custo unitário (dado sensível, guardado cifrado)." }
+  }
+}

@@ -15,6 +15,9 @@ public sealed record MoveDelta(string Sku, string? Lot, string From, string To, 
 /// <summary>A catalog record created by the plan (<c>Produto</c> or <c>Endereço</c>).</summary>
 public sealed record CreatedRecord(string Kind, string Code, string Description);
 
+/// <summary>A catalog record changed by the plan; <c>Kind</c> already says so (e.g. <c>Zona atualizada</c>) and <c>Description</c> lists the changes.</summary>
+public sealed record UpdatedRecord(string Kind, string Code, string Description);
+
 /// <summary>A signed quantity of one SKU (a receipt or an adjustment).</summary>
 public sealed record QuantityDelta(string Sku, int Quantity, string Unit);
 
@@ -30,7 +33,8 @@ public sealed class PlanDiff
         IReadOnlyList<MoveDelta> moves,
         IReadOnlyList<CreatedRecord> created,
         IReadOnlyList<QuantityDelta> receipts,
-        IReadOnlyList<QuantityDelta> adjustments)
+        IReadOnlyList<QuantityDelta> adjustments,
+        IReadOnlyList<UpdatedRecord>? updated = null)
     {
         Balances = balances;
         DirectBalances = directBalances;
@@ -38,6 +42,7 @@ public sealed class PlanDiff
         Created = created;
         Receipts = receipts;
         Adjustments = adjustments;
+        Updated = updated ?? [];
     }
 
     public IReadOnlyList<BalanceDelta> Balances { get; }
@@ -46,9 +51,10 @@ public sealed class PlanDiff
     public IReadOnlyList<CreatedRecord> Created { get; }
     public IReadOnlyList<QuantityDelta> Receipts { get; }
     public IReadOnlyList<QuantityDelta> Adjustments { get; }
+    public IReadOnlyList<UpdatedRecord> Updated { get; }
 
     /// <summary>True when the plan changed nothing.</summary>
-    public bool IsEmpty => Balances.Count == 0 && Moves.Count == 0 && Created.Count == 0;
+    public bool IsEmpty => Balances.Count == 0 && Moves.Count == 0 && Created.Count == 0 && Updated.Count == 0;
 
     /// <summary>Value equality of all lists (used to compare a simulation with the real execution).</summary>
     public bool SameAs(PlanDiff other)
@@ -56,7 +62,7 @@ public sealed class PlanDiff
         ArgumentNullException.ThrowIfNull(other);
         return Balances.SequenceEqual(other.Balances) && DirectBalances.SequenceEqual(other.DirectBalances)
             && Moves.SequenceEqual(other.Moves) && Created.SequenceEqual(other.Created)
-            && Receipts.SequenceEqual(other.Receipts) && Adjustments.SequenceEqual(other.Adjustments);
+            && Updated.SequenceEqual(other.Updated) && Receipts.SequenceEqual(other.Receipts) && Adjustments.SequenceEqual(other.Adjustments);
     }
 
     /// <summary>Builds the operator-facing summary, in Portuguese, from this diff only.</summary>
@@ -79,6 +85,8 @@ public sealed class PlanDiff
             totals.Add(new SummaryTotal("SKUs", skus.ToString(CultureInfo.InvariantCulture)));
         if (Created.Count > 0)
             totals.Add(new SummaryTotal("Cadastros", Created.Count.ToString(CultureInfo.InvariantCulture)));
+        if (Updated.Count > 0)
+            totals.Add(new SummaryTotal("Alterações", Updated.Count.ToString(CultureInfo.InvariantCulture)));
         totals.Add(new SummaryTotal("Risco", risk switch
         {
             RiskLevel.Critical => "Crítico",
@@ -94,7 +102,9 @@ public sealed class PlanDiff
             balances.Add(new BalanceChange(group.Key.Sku, group.Key.Location,
                 items.Sum(i => i.Before), items.Sum(i => i.After), items[0].Unit));
         }
-        var created = Created.Select(c => new CreatedItem(c.Kind, c.Code, c.Description)).ToList();
+        // Updated records share the "new records" list of the summary; their kind label says they were changed.
+        var created = Created.Select(c => new CreatedItem(c.Kind, c.Code, c.Description))
+            .Concat(Updated.Select(u => new CreatedItem(u.Kind, u.Code, u.Description))).ToList();
         return new ExecutionSummary(totals, flows, balances, created);
     }
 
@@ -117,6 +127,7 @@ public sealed class PlanDiffBuilder
     private readonly List<CreatedRecord> _created = [];
     private readonly List<QuantityDelta> _receipts = [];
     private readonly List<QuantityDelta> _adjustments = [];
+    private readonly List<UpdatedRecord> _updated = [];
 
     /// <summary>Records a balance change caused by a move (shown as a flow only in the summary).</summary>
     public void AddMoveBalance(string sku, string location, string? lot, int before, int after, string unit) =>
@@ -139,8 +150,11 @@ public sealed class PlanDiffBuilder
 
     public void AddCreated(string kind, string code, string description) => _created.Add(new CreatedRecord(kind, code, description));
 
+    /// <summary>Records a catalog record changed in place; <paramref name="kind"/> is the full label (e.g. <c>Endereço atualizado</c>).</summary>
+    public void AddUpdated(string kind, string code, string description) => _updated.Add(new UpdatedRecord(kind, code, description));
+
     public PlanDiff Build() => new(_all.Values.ToList(), _direct.Values.ToList(), _moves.ToList(), _created.ToList(),
-        _receipts.ToList(), _adjustments.ToList());
+        _receipts.ToList(), _adjustments.ToList(), _updated.ToList());
 
     // Aggregates per sku+location+lot: before = first observed, after = last.
     private static void Merge(Dictionary<(string, string, string), BalanceDelta> target, BalanceDelta delta)

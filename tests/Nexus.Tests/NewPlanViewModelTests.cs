@@ -11,7 +11,8 @@ public class NewPlanViewModelTests
         var session = await app.LoginAsync(username);
         return new NewPlanViewModel(session,
             new erp_inteligente.Services.Sqlite.EnginePlanService(app.Host.Engine, app.Host.ApplicationDb, app.Host.Session),
-            new FakeDialogService());
+            new FakeDialogService(),
+            new erp_inteligente.Services.Sqlite.SqliteQueryService(app.Host.ApplicationDb, app.Host.Session));
     }
 
     private static void Add(NewPlanViewModel page, string op, params (string Key, string Value)[] values)
@@ -28,7 +29,71 @@ public class NewPlanViewModelTests
         using var app = new TestApp();
         var page = await PageFor(app, "op.joao");
 
-        Assert.Equal(["receive_goods", "move_stock"], page.Operations.Select(o => o.Op));
+        var ops = page.Operations.Select(o => o.Op).ToList();
+        Assert.Contains("receive_goods", ops);
+        Assert.Contains("move_stock", ops);
+        Assert.DoesNotContain("adjust_stock", ops);
+        Assert.DoesNotContain("create_location", ops);
+        Assert.DoesNotContain("create_zone", ops);
+        Assert.DoesNotContain("create_product", ops);
+    }
+
+    [Fact]
+    public void Every_catalog_operation_has_a_generated_form()
+    {
+        Assert.Equal(erp_inteligente.Core.Engine.OperationCatalog.V1.Select(o => o.Name), NewPlanViewModel.AllOperations.Select(o => o.Op));
+        Assert.All(NewPlanViewModel.AllOperations, o => Assert.NotEmpty(o.Fields));
+        var range = NewPlanViewModel.AllOperations.Single(o => o.Op == "create_location_range");
+        Assert.Equal(["zone", "aisle", "level_from", "level_to", "capacity"], range.Fields.Select(f => f.Key));
+        Assert.Equal(PlanLookup.Zone, range.Fields[0].Lookup);
+    }
+
+    [Fact]
+    public async Task Pick_lists_come_from_the_database()
+    {
+        using var app = new TestApp();
+        var page = await PageFor(app, "sup.maria");
+        await page.OnActivatedAsync();
+
+        page.SelectedOperation = page.Operations.Single(o => o.Op == "move_stock");
+
+        var sku = page.Fields.Single(f => f.Key == "sku");
+        Assert.True(sku.HasSuggestions);
+        Assert.Contains("ABC-123", sku.Suggestions);
+        Assert.Contains("DOCA-01", page.Fields.Single(f => f.Key == "from").Suggestions);
+    }
+
+    [Fact]
+    public async Task Choosing_a_zone_fills_the_next_free_code_and_the_usual_capacity()
+    {
+        using var app = new TestApp();
+        var page = await PageFor(app, "sup.maria");
+        await page.OnActivatedAsync();
+        page.SelectedOperation = page.Operations.Single(o => o.Op == "create_location");
+
+        page.Fields.Single(f => f.Key == "zone").Value = "a";
+
+        var code = page.Fields.Single(f => f.Key == "code").Value;
+        Assert.Matches("^A-[0-9]{2}-[0-9]{2}$", code);
+        Assert.NotEqual("", page.Fields.Single(f => f.Key == "capacity").Value);
+        page.AddStepCommand.Execute(null);
+        await page.PreviewCommand.ExecuteAsync(null);
+        Assert.True(page.IsPreviewValid);
+    }
+
+    [Fact]
+    public async Task Range_form_proposes_a_free_aisle_and_previews_valid()
+    {
+        using var app = new TestApp();
+        var page = await PageFor(app, "sup.maria");
+        await page.OnActivatedAsync();
+        page.SelectedOperation = page.Operations.Single(o => o.Op == "create_location_range");
+
+        page.Fields.Single(f => f.Key == "zone").Value = "B";
+        page.AddStepCommand.Execute(null);
+        await page.PreviewCommand.ExecuteAsync(null);
+
+        Assert.True(page.IsPreviewValid, string.Join(" ", page.Issues.Select(i => i.Message)) + page.FormError);
     }
 
     [Fact]

@@ -25,7 +25,7 @@
 │ Camada de IA: Planner · skills · memórias · RAG      │
 │ ferramentas de leitura (conexão somente leitura)     │
 └─────────┬────────────────────────────────────────────┘
-          │ submit_plan (plano JSON)
+          │ propose_plan (plano JSON)
 ┌─────────▼────────────────────────────────────────────┐
 │ Motor determinístico: Validator → Simulator →        │
 │ Aprovação (crítico) → Executor (transação)           │

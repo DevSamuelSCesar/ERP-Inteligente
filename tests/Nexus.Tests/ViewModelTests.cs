@@ -20,7 +20,7 @@ public class ViewModelTests
         var shell = Shell(new DemoWorld(), DemoSessionService.Operator);
 
         var labels = shell.MenuItems.Select(i => i.Label).ToList();
-        Assert.Equal(["Nexus", "Novo plano", "Estoque", "Produtos", "Endereços", "Pedidos", "Planos", "Receitas"], labels);
+        Assert.Equal(["Nexus", "Novo plano", "Estoque", "Produtos", "Zonas", "Endereços", "Pedidos", "Parceiros", "Planos", "Receitas"], labels);
     }
 
     [Fact]
@@ -154,6 +154,87 @@ public class ViewModelTests
         var body = Assert.IsType<TextBodyViewModel>(vm.Entries.Last().Body);
         Assert.True(body.IsWarning);
         Assert.False(body.IsError);
+    }
+
+    private static PlanDraft Move(int qty, string to) =>
+        DemoPlanService.ToDraft("putaway", "armazenagem",
+            [new PlanStep(PlanOperation.MoveStock, qty, "cx", "ABC-123", "DOCA-01", to)]);
+
+    [Fact]
+    public async Task Alternatives_show_as_options_and_confirming_one_supersedes_the_others()
+    {
+        var w = new DemoWorld();
+        var reply = new erp_inteligente.Services.NexusReply("Há dois caminhos.", Proposals:
+        [
+            new("Guardar em A-02-01", "Endereço com mais espaço livre.", ["Quantidade: 40 cx (tudo o que está na doca)"], Move(40, "A-02-01")),
+            new("Dividir entre A-02-01 e A-01-02", "Mantém o picking abastecido.", [], Move(20, "A-01-02")),
+        ]);
+        var vm = new NexusViewModel(DemoSessionService.Supervisor, new FixedNexus(reply), w.Plans, new FakeDialogService(), TimeProvider.System);
+        vm.Draft = "guarde o ABC-123";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var cards = vm.Entries.Select(e => e.Body).OfType<DraftPlanViewModel>().ToList();
+        Assert.Equal(2, cards.Count);
+        Assert.Equal("Opção 1 de 2 · Guardar em A-02-01", cards[0].Title);
+        Assert.Equal("Endereço com mais espaço livre.", cards[0].Rationale!.Text);
+        Assert.Contains(cards[0].Assumptions[0].Segments, s => s.Kind == NexusTextKind.Quantity);
+        Assert.False(vm.IsInputEnabled);
+
+        await cards[1].ConfirmCommand.ExecuteAsync(null);
+
+        Assert.Equal(DraftState.Confirmed, cards[1].State);
+        Assert.Equal(DraftState.Discarded, cards[0].State);
+        Assert.Contains("Outra opção", cards[0].StatusText);
+        Assert.True(vm.IsInputEnabled);
+        Assert.IsType<PlanBoardViewModel>(vm.Entries.Last().Body);
+    }
+
+    [Fact]
+    public async Task Discarding_every_alternative_frees_the_input_and_writes_nothing()
+    {
+        var w = new DemoWorld();
+        var reply = new erp_inteligente.Services.NexusReply("", Proposals:
+            [new("A", "", [], Move(1, "A-02-01")), new("B", "", [], Move(2, "A-02-01"))]);
+        var vm = new NexusViewModel(DemoSessionService.Supervisor, new FixedNexus(reply), w.Plans, new FakeDialogService(), TimeProvider.System);
+        vm.Draft = "x";
+        await vm.SendCommand.ExecuteAsync(null);
+        var cards = vm.Entries.Select(e => e.Body).OfType<DraftPlanViewModel>().ToList();
+
+        cards[0].DiscardCommand.Execute(null);
+        Assert.False(vm.IsInputEnabled);
+        cards[1].DiscardCommand.Execute(null);
+
+        Assert.True(vm.IsInputEnabled);
+        Assert.Equal(2, w.Data.Plans.Count);
+    }
+
+    [Fact]
+    public async Task Choosing_an_option_sends_its_request()
+    {
+        var nexus = new RecordingNexus(new erp_inteligente.Services.NexusReply("A zona Q não existe.",
+            Options: [new("Criar a zona Q", "crie a zona Q e o endereço Q-01-01"), new("", "sem rótulo é ignorada")]));
+        var vm = new NexusViewModel(DemoSessionService.Supervisor, nexus, new DemoWorld().Plans, new FakeDialogService(), TimeProvider.System);
+        vm.Draft = "guarde em Q-01-01";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var row = Assert.IsType<OptionsViewModel>(vm.Entries.Last().Body);
+        var option = Assert.Single(row.Options);
+        await row.ChooseCommand.ExecuteAsync(option);
+
+        Assert.Equal(["guarde em Q-01-01", "crie a zona Q e o endereço Q-01-01"], nexus.Requests);
+        Assert.False(row.ChooseCommand.CanExecute(option));
+    }
+
+    private sealed class RecordingNexus(erp_inteligente.Services.NexusReply reply) : erp_inteligente.Services.INexusService
+    {
+        public List<string> Requests { get; } = [];
+
+        public Task<erp_inteligente.Services.NexusReply> SendAsync(string request, UserSession user, IProgress<string> status,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(reply);
+        }
     }
 
     private sealed class GatedNexus(Task gate) : erp_inteligente.Services.INexusService

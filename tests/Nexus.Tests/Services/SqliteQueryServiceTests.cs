@@ -108,6 +108,36 @@ public class SqliteQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Zones_list_the_warehouse_zones_with_capacity_and_occupancy()
+    {
+        var rows = await _queries.GetZonesAsync();
+
+        Assert.Equal(["A", "B", "C", "DOCA"], rows.Select(r => r.Code));
+        Assert.All(rows, r => Assert.True(r.IsActive));
+        var locations = await _queries.GetLocationsAsync();
+        Assert.Equal(locations.Sum(l => l.Capacity), rows.Sum(r => r.Capacity));
+        Assert.Equal(locations.Sum(l => l.Occupied), rows.Sum(r => r.Occupied));
+    }
+
+    [Fact]
+    public async Task Zones_of_another_warehouse_never_appear()
+    {
+        SqliteTestData.AddSecondWarehouse(_f);
+
+        Assert.DoesNotContain(await _queries.GetZonesAsync(), z => z.Name == "Docas do CD 02");
+    }
+
+    [Fact]
+    public async Task Partners_show_only_masked_documents()
+    {
+        var rows = await _queries.GetPartnersAsync();
+
+        Assert.Contains(rows, r => r.Kind == "Fornecedor");
+        Assert.Contains(rows, r => r.Kind == "Cliente");
+        Assert.All(rows.Where(r => r.Document.Length > 0), r => Assert.Contains("*", r.Document));
+    }
+
+    [Fact]
     public async Task Locations_list_every_location_with_zone_capacity_and_occupancy()
     {
         var rows = await _queries.GetLocationsAsync();

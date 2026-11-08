@@ -35,6 +35,18 @@ public static class SchemaValidator
         ["weight_kg"] = ("peso", "o", Kind.Number),
         ["description"] = ("descrição", "a", Kind.Text),
         ["tracks_expiry"] = ("controle de validade", "o", Kind.Boolean),
+        ["is_active"] = ("situação", "a", Kind.Boolean),
+        ["aisle"] = ("corredor", "o", Kind.Integer),
+        ["level_from"] = ("nível inicial", "o", Kind.Integer),
+        ["level_to"] = ("nível final", "o", Kind.Integer),
+        ["document_masked"] = ("documento", "o", Kind.Text),
+        ["supplier"] = ("fornecedor", "o", Kind.Text),
+        ["customer"] = ("cliente", "o", Kind.Text),
+        ["document_number"] = ("número do documento", "o", Kind.Text),
+        ["order_number"] = ("número do pedido", "o", Kind.Text),
+        ["expected_on"] = ("data prevista", "a", Kind.Text),
+        ["due_on"] = ("data de entrega", "a", Kind.Text),
+        ["lines"] = ("lista de itens", "a", Kind.List),
     };
 
     private static readonly Dictionary<string, string> PatternHints = new(StringComparer.Ordinal)
@@ -44,14 +56,25 @@ public static class SchemaValidator
         ["from"] = "ter o formato A-01-01 ou DOCA-01",
         ["to"] = "ter o formato A-01-01 ou DOCA-01",
         ["code"] = "ter o formato A-01-01 ou DOCA-01",
+        ["update_zone.code"] = "ter de 1 a 4 letras maiúsculas (por exemplo, Q)",
+        ["create_zone.code"] = "ter de 1 a 4 letras maiúsculas (por exemplo, Q)",
+        ["name"] = "ser um texto simples, sem quebras de linha nem caracteres de controle",
+        ["document_masked"] = "estar mascarado (por exemplo, **.***.***/0001-**), só com dígitos, asteriscos e pontuação, e ao menos um asterisco",
         ["unit"] = "ter de 1 a 4 letras minúsculas (por exemplo, un ou kg)",
         ["zone"] = "ter de 1 a 4 letras maiúsculas (por exemplo, A)",
         ["expires_on"] = "ter o formato AAAA-MM-DD",
+        ["expected_on"] = "ter o formato AAAA-MM-DD",
+        ["due_on"] = "ter o formato AAAA-MM-DD",
+        ["document_number"] = "ter de 3 a 30 caracteres: letras maiúsculas, dígitos e hífen",
+        ["order_number"] = "ter de 3 a 30 caracteres: letras maiúsculas, dígitos e hífen",
+        ["supplier"] = "ser um texto simples, sem quebras de linha nem caracteres de controle",
+        ["customer"] = "ser um texto simples, sem quebras de linha nem caracteres de controle",
+        ["reason"] = "ser um texto simples, sem quebras de linha nem caracteres de controle",
     };
 
     private static readonly Dictionary<string, JsonNode?> SchemaNodes = BuildSchemaNodes();
 
-    private enum Kind { Text, Integer, Number, Boolean }
+    private enum Kind { Text, Integer, Number, Boolean, List }
 
     /// <summary>Validates all steps; an empty list means every step is schema-valid.</summary>
     public static IReadOnlyList<PlanError> Validate(PlanDocument doc)
@@ -117,12 +140,21 @@ public static class SchemaValidator
 
             foreach (var (keyword, _) in detail.Errors)
             {
+                if (field == "lines" && NestedLine(pointer) is { } nested)
+                {
+                    if (keyword is not ("properties" or "items" or "false"))
+                        Add("lines", "schema.line", $"Passo {n}: {DescribeLine(keyword, nested, step.Op)}");
+                    continue;
+                }
                 switch (keyword)
                 {
                     case "required":
                         foreach (var name in Required(schemaNode))
                             if (!step.Args.ContainsKey(name))
                                 Add(name, "schema.required", $"Passo {n}: falta {Article(name)} {LabelOf(name)}.");
+                        break;
+                    case "minProperties":
+                        Add(null, "schema.minProperties", $"Passo {n}: informe ao menos um campo a alterar além do identificador.");
                         break;
                     case "additionalProperties":
                     case "false":
@@ -132,7 +164,7 @@ public static class SchemaValidator
                         if (field is null)
                             Add(null, "schema." + keyword, $"Passo {n}: os dados da operação estão inválidos.");
                         else
-                            Add(field, "schema." + keyword, Describe(keyword, n, field, step.Args[field], properties));
+                            Add(field, "schema." + keyword, Describe(keyword, n, field, step.Args[field], properties, definition.Name));
                         break;
                 }
             }
@@ -141,7 +173,7 @@ public static class SchemaValidator
         foreach (var (name, value) in step.Args)
             if (!unknown.Contains(name) && !errors.Exists(e => e.StepIndex == step.Index && e.Field == name)
                 && EndsWithNewlineWhereAnchored(name, value, properties))
-                Add(name, "schema.pattern", $"Passo {n}: {Article(name)} {LabelOf(name)} deve {PatternHints.GetValueOrDefault(name, "ter o formato esperado")}.");
+                Add(name, "schema.pattern", $"Passo {n}: {Article(name)} {LabelOf(name)} deve {Hint(step.Op, name)}.");
 
         // A pattern violation already says everything; drop the redundant length error of the same field.
         errors.RemoveAll(e => e.StepIndex == step.Index && e.Code == "schema.maxLength"
@@ -151,7 +183,32 @@ public static class SchemaValidator
             errors.Add(new PlanError(step.Index, null, "schema.invalid", $"Passo {n}: os dados da operação estão inválidos."));
     }
 
-    private static string Describe(string keyword, int n, string field, JsonNode? value, JsonObject properties)
+    /// <summary>The 1-based line number and sub-field (null when the error is about the whole line) of a <c>/lines/N[/field]</c> pointer.</summary>
+    private static (int Line, string? Field)? NestedLine(string pointer)
+    {
+        var parts = pointer.Split('/');
+        if (parts.Length < 3 || parts[1] != "lines" || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var index))
+            return null;
+        return (index + 1, parts.Length > 3 ? parts[3] : null);
+    }
+
+    private static string DescribeLine(string keyword, (int Line, string? Field) nested, string op)
+    {
+        var where = $"na linha {nested.Line}";
+        if (nested.Field is null)
+            return $"{where}, confira os campos: o SKU é obrigatório e nada além de quantidade, endereço e lote é aceito.";
+        var label = nested.Field switch { "sku" => "SKU", "qty" => "quantidade", "location" => "endereço", "lot" => "lote", _ => "campo" };
+        return keyword switch
+        {
+            "pattern" when nested.Field == "sku" => $"{where}, o SKU deve ter o formato ABC-123.",
+            "pattern" when nested.Field == "location" => $"{where}, o endereço deve ter o formato A-01-01 ou DOCA-01.",
+            "minimum" or "maximum" => $"{where}, a quantidade deve ficar entre 1 e 100000.",
+            "type" => $"{where}, o campo {label} tem um tipo inválido.",
+            _ => $"{where}, o campo {label} tem um valor inválido.",
+        };
+    }
+
+    private static string Describe(string keyword, int n, string field, JsonNode? value, JsonObject properties, string op)
     {
         var label = LabelOf(field);
         var art = Article(field);
@@ -164,9 +221,9 @@ public static class SchemaValidator
             case "anyOf":
                 if (value is not JsonValue v || !v.TryGetValue<string>(out _))
                     return $"Passo {cap}: {art} {label} deve ser um texto.";
-                return $"Passo {cap}: {art} {label} deve {PatternHints.GetValueOrDefault(field, "ter o formato esperado")} ou ser o resultado de um passo anterior.";
+                return $"Passo {cap}: {art} {label} deve {Hint(op, field)} ou ser o resultado de um passo anterior.";
             case "pattern":
-                return $"Passo {cap}: {art} {label} deve {PatternHints.GetValueOrDefault(field, "ter o formato esperado")}.";
+                return $"Passo {cap}: {art} {label} deve {Hint(op, field)}.";
             case "minimum":
                 return $"Passo {cap}: {art} {label} deve ser no mínimo {Bound(prop, "minimum")}.";
             case "maximum":
@@ -177,10 +234,19 @@ public static class SchemaValidator
                 return $"Passo {cap}: {art} {label} deve ter no máximo {Bound(prop, "maxLength")} caracteres.";
             case "not":
                 return $"Passo {cap}: {art} {label} não pode ser zero.";
+            case "minItems":
+                return $"Passo {cap}: informe ao menos 1 item em {label}.";
+            case "maxItems":
+                return $"Passo {cap}: {label} aceita no máximo {Bound(prop, "maxItems")} itens.";
             default:
                 return $"Passo {cap}: {art} {label} tem um valor inválido.";
         }
     }
+
+    // Hint for a field of an operation: "<op>.<field>" overrides the generic "<field>" text (a zone code is not a location code).
+    private static string Hint(string op, string field) =>
+        PatternHints.TryGetValue(op + "." + field, out var specific) ? specific
+        : PatternHints.GetValueOrDefault(field, "ter o formato esperado");
 
     private static string KindText(string field) =>
         (Fields.TryGetValue(field, out var f) ? f.Kind : Kind.Text) switch
@@ -188,6 +254,7 @@ public static class SchemaValidator
             Kind.Integer => "um número inteiro",
             Kind.Number => "um número",
             Kind.Boolean => "sim ou não",
+            Kind.List => "uma lista",
             _ => "um texto",
         };
 

@@ -40,6 +40,15 @@ public sealed class DemoQueryService(DemoData data) : IQueryService
         return Task.FromResult(rows);
     }
 
+    public Task<IReadOnlyList<ZoneRow>> GetZonesAsync() =>
+        Task.FromResult<IReadOnlyList<ZoneRow>>(data.Zones
+            .Select(z => new ZoneRow(z.Key, z.Value, true, data.Locations.Count(l => l.ZoneCode == z.Key),
+                data.Locations.Where(l => l.ZoneCode == z.Key).Sum(l => l.Capacity),
+                data.Locations.Where(l => l.ZoneCode == z.Key).Sum(l => data.OccupiedAt(l.Code))))
+            .ToList());
+
+    public Task<IReadOnlyList<PartnerRow>> GetPartnersAsync() => Task.FromResult<IReadOnlyList<PartnerRow>>([]);
+
     public Task<IReadOnlyList<OrderRow>> GetOrdersAsync() => Task.FromResult<IReadOnlyList<OrderRow>>(data.Orders.ToList());
 
     public Task<IReadOnlyList<RecipeRow>> GetRecipesAsync() => Task.FromResult<IReadOnlyList<RecipeRow>>(data.Recipes.ToList());

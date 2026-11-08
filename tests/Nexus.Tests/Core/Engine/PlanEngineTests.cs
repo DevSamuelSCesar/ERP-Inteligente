@@ -150,16 +150,30 @@ public sealed class PlanEngineTests : IDisposable
     [InlineData("{\"op\":\"create_location\",\"args\":{\"code\":\"A-09-01\",\"zone\":\"A\",\"capacity\":100}}")]
     public void Ai_plan_gets_only_the_rights_shared_by_the_ai_role_and_the_requester(string step)
     {
-        // sup.maria holds stock.adjust and location.manage; the AI role does not, so a plan of the AI may not use them.
-        var preview = _engine.Preview(_maria, Json(step), "ai");
+        // Since migration 003 the AI role holds stock.adjust and location.manage itself; effective rights are AI ∩ requester.
+        // op.joao lacks them, so a plan of the AI on his behalf is denied.
+        var preview = _engine.Preview(_joao, Json(step), "ai");
         Assert.Contains(preview.Errors, e => e.Code == "policy.denied");
 
-        var result = _engine.Submit(_maria, Json(step), "ai");
+        var result = _engine.Submit(_joao, Json(step), "ai");
         Assert.Equal("failed", result.Status);
         Assert.Contains(result.Errors, e => e.Code == "policy.denied");
         Assert.Equal(40, Qty("ABC-123", "DOCA-01"));
         Assert.Equal(0, _f.Scalar("SELECT COUNT(*) FROM locations WHERE code = 'A-09-01'"));
         AssertChainValid();
+    }
+
+    [Fact]
+    public void Ai_plan_requested_by_a_supervisor_is_valid_until_the_ai_role_gets_an_explicit_deny()
+    {
+        const string step = "{\"op\":\"create_location\",\"args\":{\"code\":\"A-09-01\",\"zone\":\"A\",\"capacity\":100}}";
+        Assert.True(_engine.Preview(_maria, Json(step), "ai").IsValid);
+
+        _f.Exec("DELETE FROM role_permissions WHERE role_id = 5 AND permission = 'location.manage'");
+        _f.Exec("INSERT INTO role_permissions (role_id, permission, effect) VALUES (5, 'location.manage', 'DENY')");
+        var denied = _engine.Preview(_maria, Json(step), "ai");
+        Assert.Contains(denied.Errors, e => e.Code == "policy.denied");
+        Assert.True(_engine.Preview(_maria, Json(step), "user").IsValid);
     }
 
     [Fact]
@@ -173,10 +187,12 @@ public sealed class PlanEngineTests : IDisposable
     [Fact]
     public void Approval_of_an_ai_plan_reads_the_ai_intersection_again()
     {
-        // A pending plan marked as planned by the AI fails at approval: the AI role lacks stock.adjust.
-        var pending = _engine.Submit(_maria, Json(Adjust("ABC-123", -5, "DOCA-01")), "user");
+        // An AI plan by a supervisor waits for approval; if the AI role then loses stock.adjust, approval fails.
+        var pending = _engine.Submit(_maria, Json(Adjust("ABC-123", -5, "DOCA-01")), "ai");
+        Assert.Equal("pending_approval", pending.Status);
         var id = pending.PlanId!.Value;
-        _f.Exec("UPDATE plans SET planned_by = 'ai' WHERE id = $id", ("$id", id));
+        _f.Exec("DELETE FROM role_permissions WHERE role_id = 5 AND permission = 'stock.adjust'");
+        _f.Exec("INSERT INTO role_permissions (role_id, permission, effect) VALUES (5, 'stock.adjust', 'DENY')");
 
         _engine.Approve(AddSupervisor("sup.outro", _maria.WarehouseId), id);
 

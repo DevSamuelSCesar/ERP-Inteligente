@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using erp_inteligente.Models;
@@ -6,8 +7,18 @@ using erp_inteligente.Models;
 namespace erp_inteligente.Services;
 
 /// <summary>
-/// Answer of the Nexus to a request: short plain text and, when data must change, a draft of the Planner with its
-/// dry run. The draft is only written after the requester confirms it.
+/// One plan proposed by the Planner: a short title, why it was chosen, what it assumed (values the operator did not
+/// give) and the draft. Nothing is written until the requester confirms it.
+/// </summary>
+public sealed record NexusProposal(string Title, string Rationale, IReadOnlyList<string> Assumptions, PlanDraft Draft,
+    PlanPreview? Preview = null);
+
+/// <summary>A suggested next step; choosing it sends <see cref="Request"/> to the Nexus as if typed.</summary>
+public sealed record NexusOption(string Label, string Request);
+
+/// <summary>
+/// Answer of the Nexus to a request: short plain text, up to three alternative proposals (or a single
+/// <see cref="Draft"/>) and suggested next steps. Proposals are only written after the requester confirms one.
 /// </summary>
 /// <param name="IsEscalated">The Planner hit a limit (attempts, rounds or tokens): the task needs the operator.</param>
 public sealed record NexusReply(
@@ -15,7 +26,9 @@ public sealed record NexusReply(
     PlanDraft? Draft = null,
     PlanPreview? Preview = null,
     bool IsError = false,
-    bool IsEscalated = false);
+    bool IsEscalated = false,
+    IReadOnlyList<NexusProposal>? Proposals = null,
+    IReadOnlyList<NexusOption>? Options = null);
 
 /// <summary>Turns a natural-language request into a reply or a plan (the Planner, seen from the UI).</summary>
 public interface INexusService

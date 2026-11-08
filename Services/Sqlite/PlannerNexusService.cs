@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using erp_inteligente.Core.Planner;
@@ -10,7 +11,7 @@ namespace erp_inteligente.Services.Sqlite;
 /// <summary>
 /// The Nexus backed by the Planner (ROADMAP.md, feature 3). Keeps the last finished exchanges of the session in memory
 /// (never in the database) so the operator can refer to them; a different user starts with an empty history.
-/// A proposed plan is returned as a draft only: the requester confirms it before the engine writes anything.
+/// Proposed plans (up to three alternatives) are returned as drafts only: the requester confirms it before the engine writes anything.
 /// </summary>
 public sealed class PlannerNexusService(Planner planner, int maxHistoryTurns = 10) : INexusService
 {
@@ -30,13 +31,19 @@ public sealed class PlannerNexusService(Planner planner, int maxHistoryTurns = 1
 
         return result switch
         {
-            PlannerAnswer answer => new NexusReply(answer.Text),
-            PlannerProposal proposal => new NexusReply(proposal.Text ?? "", proposal.Draft),
+            PlannerAnswer answer => new NexusReply(answer.Text, Options: MapOptions(answer.Options)),
+            PlannerProposals proposals => new NexusReply(
+                proposals.Text ?? "",
+                Proposals: proposals.Items.Select(i => new NexusProposal(i.Title, i.Rationale, i.Assumptions, i.Draft)).ToList(),
+                Options: MapOptions(proposals.Options)),
             PlannerEscalated escalated => new NexusReply(escalated.Reason, IsEscalated: true),
             PlannerFailed failed => new NexusReply(failed.Reason, IsError: true),
             _ => new NexusReply("Falha ao processar o pedido. Nada foi gravado.", IsError: true),
         };
     }
+
+    private static IReadOnlyList<NexusOption> MapOptions(IReadOnlyList<PlannerOption> options) =>
+        options.Select(o => new NexusOption(o.Label, o.Request)).ToList();
 
     private IReadOnlyList<PlannerTurn> Snapshot(UserSession user)
     {

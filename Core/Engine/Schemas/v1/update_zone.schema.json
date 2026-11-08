@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update_zone",
+  "description": "Altera o nome ou a situação (ativa/desativada) de uma zona. Informe ao menos um campo além do código. Uma zona com estoque não pode ser desativada.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code"],
+  "minProperties": 2,
+  "properties": {
+    "code": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{1,4}$", "maxLength": 4 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "Código da zona (Q) ou referência a um passo anterior." },
+    "name": { "type": "string", "pattern": "^[^\\u0000-\\u001F\\u007F]+$", "minLength": 1, "maxLength": 80, "description": "Novo nome da zona." },
+    "is_active": { "type": "boolean", "description": "true para ativar, false para desativar a zona." }
+  }
+}

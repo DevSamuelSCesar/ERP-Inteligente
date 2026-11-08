@@ -25,6 +25,29 @@ internal static class StockStore
     public static int? Int(JsonObject args, string name) =>
         args[name] is JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
 
+    public static bool? Bool(JsonObject args, string name) =>
+        args[name] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
+
+    public static double? Dbl(JsonObject args, string name) =>
+        args[name] is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;
+
+    public static decimal? Dec(JsonObject args, string name)
+    {
+        if (args[name] is not JsonValue v) return null;
+        if (v.TryGetValue<decimal>(out var m)) return m;
+        return v.TryGetValue<double>(out var d) ? (decimal)d : null;
+    }
+
+    /// <summary>Stores the unit cost encrypted (AES-GCM, AAD <c>products.unit_cost_enc#id</c>); it is never written in clear.</summary>
+    public static void StoreUnitCost(EngineContext ctx, long productId, decimal cost)
+    {
+        var cipher = ctx.Cipher.Encrypt(cost.ToString(System.Globalization.CultureInfo.InvariantCulture), "products", "unit_cost_enc", productId);
+        using var update = ctx.Command("UPDATE products SET unit_cost_enc = $c WHERE id = $id");
+        update.Parameters.AddWithValue("$c", cipher);
+        update.Parameters.AddWithValue("$id", productId);
+        update.ExecuteNonQuery();
+    }
+
     public static PlanError Error(PlanStepDocument step, string? field, string code, string message) =>
         new(step.Index, field, code, $"Passo {step.Index + 1}: {message}");
 
@@ -37,13 +60,16 @@ internal static class StockStore
         return r.Read() ? new ProductRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetInt64(3) == 1) : null;
     }
 
-    /// <summary>Finds an active location of the session warehouse; other warehouses are indistinguishable from unknown codes.</summary>
+    /// <summary>
+    /// Finds an active location, in an active zone, of the session warehouse; other warehouses are indistinguishable
+    /// from unknown codes. Use <see cref="UnknownLocation(EngineContext, string?)"/> to explain a miss.
+    /// </summary>
     public static LocationRow? FindLocation(EngineContext ctx, string? code)
     {
         if (code is null) return null;
         using var cmd = ctx.Command(
             "SELECT l.id, l.code, l.capacity, z.code FROM locations l JOIN zones z ON z.id = l.zone_id " +
-            "WHERE l.code = $code AND z.warehouse_id = $wh AND l.is_active = 1");
+            "WHERE l.code = $code AND z.warehouse_id = $wh AND l.is_active = 1 AND z.is_active = 1");
         cmd.Parameters.AddWithValue("$code", code);
         cmd.Parameters.AddWithValue("$wh", ctx.WarehouseId);
         using var r = cmd.ExecuteReader();
@@ -177,7 +203,25 @@ internal static class StockStore
         cmd.ExecuteNonQuery();
     }
 
-    public static string UnknownLocation(string? code) => $"o endereço {code} não existe neste armazém.";
+    /// <summary>Why <see cref="FindLocation"/> found nothing: unknown in this warehouse, deactivated, or in a deactivated zone.</summary>
+    public static string UnknownLocation(EngineContext ctx, string? code)
+    {
+        if (code is not null)
+        {
+            using var cmd = ctx.Command(
+                "SELECT l.is_active, z.is_active, z.code FROM locations l JOIN zones z ON z.id = l.zone_id " +
+                "WHERE l.code = $code AND z.warehouse_id = $wh");
+            cmd.Parameters.AddWithValue("$code", code);
+            cmd.Parameters.AddWithValue("$wh", ctx.WarehouseId);
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                if (r.GetInt64(1) == 0) return $"a zona {r.GetString(2)} do endereço {code} está desativada.";
+                if (r.GetInt64(0) == 0) return $"o endereço {code} está desativado.";
+            }
+        }
+        return $"o endereço {code} não existe neste armazém.";
+    }
 
     public static string OutOfCapacity(LocationRow location, int occupied, int qty) =>
         $"o endereço {location.Code} não comporta mais {qty} (ocupação {occupied} de {location.Capacity}).";

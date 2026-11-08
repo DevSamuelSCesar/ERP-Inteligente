@@ -29,6 +29,26 @@ public class AiConnectionTests : IDisposable
         Assert.True(ex.SqliteErrorCode == 23 || ex.Message.Contains("not authorized", StringComparison.OrdinalIgnoreCase), ex.Message);
     }
 
+    [Theory]
+    [InlineData("SELECT id, code, is_active FROM v_ai_zones")]
+    [InlineData("SELECT sku, lot_code, expires_on FROM v_ai_lots")]
+    [InlineData("SELECT kind, id, name, is_active FROM v_ai_partners")]
+    public void ReadsZonesLotsAndPartnersThroughAiViews(string sql)
+    {
+        using var cmd = _ai.CreateCommand();
+        cmd.CommandText = sql;
+        using var r = cmd.ExecuteReader();
+        Assert.True(r.Read());
+    }
+
+    [Theory]
+    [InlineData("SELECT cnpj_enc FROM suppliers")]
+    [InlineData("SELECT contact_email_enc FROM customers")]
+    [InlineData("SELECT cnpj_masked FROM suppliers")]
+    [InlineData("SELECT document_masked FROM customers")]
+    [InlineData("SELECT kind, cnpj_masked FROM v_ai_partners JOIN suppliers USING (id)")]
+    public void PartnerDocumentsAndContacts_AreDenied(string sql) => AssertDenied(sql);
+
     [Fact]
     public void ReadsStockThroughAiView()
     {

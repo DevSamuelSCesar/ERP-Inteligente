@@ -31,12 +31,15 @@ public sealed partial class ShellViewModel : ViewModelBase
 
         NavigationItem[] menu =
         [
-            new("Nexus", "Nexus", () => new NexusViewModel(_user, nexus, plans, dialogs, time), Permissions.PlanSubmit),
-            new("Novo plano", "NewPlan", () => new NewPlanViewModel(_user, plans, dialogs), Permissions.PlanSubmit),
+            new("Nexus", "Nexus", () => new NexusViewModel(_user, nexus, plans, dialogs, time,
+                async () => (await queries.GetProductsAsync()).Select(p => p.Name).ToList()), Permissions.PlanSubmit),
+            new("Novo plano", "NewPlan", () => new NewPlanViewModel(_user, plans, dialogs, queries), Permissions.PlanSubmit),
             new("Estoque", "Stock", () => new StockViewModel(queries, time), Permissions.StockRead),
             new("Produtos", "Products", () => new ProductsViewModel(queries), Permissions.StockRead),
+            new("Zonas", "Zones", () => new ZonesViewModel(queries), Permissions.StockRead),
             new("Endereços", "Locations", () => new LocationsViewModel(queries), Permissions.StockRead),
             new("Pedidos", "Orders", () => new OrdersViewModel(queries), Permissions.StockRead),
+            new("Parceiros", "Partners", () => new PartnersViewModel(queries), Permissions.StockRead),
             new("Planos", "Plans", () => new PlansViewModel(_user, plans, dialogs), Permissions.PlanSubmit, Permissions.PlanApprove, Permissions.AuditRead),
             new("Receitas", "Recipes", () => new RecipesViewModel(queries), Permissions.StockRead),
             new("Auditoria", "Audit", () => new AuditViewModel(queries), Permissions.AuditRead),
