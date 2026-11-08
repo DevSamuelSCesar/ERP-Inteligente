@@ -24,6 +24,11 @@
     <EmbeddedResource Include="Core\Engine\Schemas\v1\*.schema.json" LogicalName="Nexus.Dsl.v1.%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- System prompt of the Planner (Core/Planner) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Core\Planner\Prompts\system.md" LogicalName="Nexus.Planner.system.md" />
+  </ItemGroup>
+
   <!-- The test project lives under tests/ and must not be compiled into the app. -->
   <ItemGroup>
     <Compile Remove="tests\**" />

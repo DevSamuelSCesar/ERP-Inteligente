@@ -21,9 +21,14 @@ DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (di
 
 ## Camada de IA
 
-### 3. Planner com tool calling
-`ILlmProvider` com adaptador Claude (OpenAI e DeepSeek depois), ferramentas de leitura sobre as views `v_ai_*`, `submit_plan` com devolução de erros estruturados e limite de tentativas, e tela de chat com prévia do plano e confirmação.
+### 3. Planner com tool calling ✅
+`ILlmProvider` com o primeiro adaptador, ferramentas de leitura sobre as views `v_ai_*`, `submit_plan` com devolução de erros estruturados e limite de tentativas, e tela de chat com prévia do plano e confirmação.
 *Por que junto:* o Planner só tem valor com as ferramentas de leitura e a tela de chat que o alimentam e exibem seu resultado.
+*Estado:* pronto, só com a **DeepSeek**. Claude e OpenAI ficam para a feature 8.
+- Código em `Core/Llm` (provedor, chave no cofre do SO) e `Core/Planner` (laço de ferramentas, prompt de sistema).
+- A chave é digitada pelo administrador em Configurações.
+- O plano da IA volta como proposta: só é gravado quando quem pediu confirma.
+- O motor aplica os direitos IA ∩ usuário a todo plano da IA.
 
 ### 4. Skills e catálogo completo de operações
 Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`, junto com as operações `reserve_stock`, `pick_items` e `ship_order` (`adjust_stock` já entrou na feature 2).
@@ -45,7 +50,7 @@ Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com mod
 ## Evolução
 
 ### 8. Multi-provedor e fine-tuning
-Adaptadores OpenAI e DeepSeek, modelo por papel configurável e experimento de fine-tuning do Matcher, que só substitui o Haiku se empatar ou superar no *exact match*.
+Adaptadores Claude e OpenAI (a DeepSeek entrou na feature 3), modelo por papel configurável e experimento de fine-tuning do Matcher, que só substitui o Haiku se empatar ou superar no *exact match*.
 
 ### 9. Operação
 Backup criptografado pela API do SQLite, job de manutenção de memórias, painel de auditoria e de custos de tokens, e instaladores por plataforma.

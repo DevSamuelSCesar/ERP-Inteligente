@@ -164,7 +164,11 @@ O teste `OptimizationTests` confere automaticamente que os planos de execução 
 | Autoaprovação, aprovação ou rejeição pela IA, aprovação por quem não tem `plan.approve` | `PlanEngineTests` (C#) + triggers testados em `PrivilegeEscalationTests` (Python) | Automatizado ✅ |
 | Operação acima dos direitos de quem pediu, mesmo aprovada por supervisor | `PlanEngineTests` (C#): o plano falha com a mensagem de permissão | Automatizado ✅ |
 | Estado mudou entre simulação e aprovação (corrida) | `PlanEngineTests` (C#): o plano falha e nada é gravado | Automatizado ✅ |
-| Payloads nos argumentos de todas as ferramentas da IA | Testes da aplicação C# | Quando o Planner existir (feature 3) |
+| Payloads nos argumentos de todas as ferramentas da IA (SQL injection no SKU, campo extra, JSON malformado, ferramenta inexistente) | `PlannerTests` (C#) | Automatizado ✅ |
+| Pesquisa de produtos com SQL no texto, curingas `%`/`_`, SKU malformado, campo extra, outro armazém | `ProductSearchTests` (C#) | Automatizado ✅ |
+| Dado hostil fechando o bloco `<dados>` | `PlannerTests` (C#) | Automatizado ✅ |
+| Plano da IA com operação fora do direito IA ∩ usuário (ajuste por um supervisor) | `PlanEngineTests` e `PlannerTests` (C#) | Automatizado ✅ |
+| Chave de API em mensagens de erro ou na auditoria | `DeepSeekProviderTests` e `SettingsViewModelTests` (C#) | Automatizado ✅ |
 
 ```bash
 python3 -m unittest discover -s db/tests -v   # 34 testes

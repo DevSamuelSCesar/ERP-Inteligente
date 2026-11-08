@@ -10,9 +10,10 @@ public sealed class TranscriptEntryViewModel(DateTimeOffset at, string author, V
     public ViewModelBase Body { get; } = body;
 }
 
-/// <summary>Short plain-text answer; never rendered as Markdown.</summary>
-public sealed class TextBodyViewModel(string text, bool isError = false) : ViewModelBase
+/// <summary>Short plain-text answer; never rendered as Markdown. A warning marks a task escalated to the operator.</summary>
+public sealed class TextBodyViewModel(string text, bool isError = false, bool isWarning = false) : ViewModelBase
 {
     public string Text { get; } = text;
     public bool IsError { get; } = isError;
+    public bool IsWarning { get; } = isWarning && !isError;
 }

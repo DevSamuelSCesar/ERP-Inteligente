@@ -25,6 +25,16 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
         ORDER BY p.sku, l.code, COALESCE(lt.lot_code, '')
         """;
 
+    // Products are global; only the balance is scoped, so a product created without stock still appears.
+    // unit_cost_enc is sensitive and deliberately not selected.
+    private const string ProductsSql = """
+        SELECT p.sku, p.name, p.unit, p.weight_kg, p.tracks_expiry, COALESCE(p.description, ''),
+               (SELECT COALESCE(SUM(b.quantity), 0) FROM stock_balances b
+                WHERE b.product_id = p.id AND b.warehouse_id = $warehouse_id) AS balance
+        FROM products p
+        ORDER BY p.sku
+        """;
+
     private const string LocationsSql = """
         SELECT l.code, z.name, l.capacity,
                (SELECT COALESCE(SUM(b.quantity), 0) FROM stock_balances b
@@ -72,6 +82,9 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
     public Task<IReadOnlyList<StockRow>> GetStockAsync() =>
         db.QueryScopedAsync(session.Current, Permissions.StockRead, StockSql, ReadStock);
 
+    public Task<IReadOnlyList<ProductRow>> GetProductsAsync() =>
+        db.QueryScopedAsync(session.Current, Permissions.StockRead, ProductsSql, ReadProduct);
+
     public Task<IReadOnlyList<LocationRow>> GetLocationsAsync() =>
         db.QueryScopedAsync(session.Current, Permissions.StockRead, LocationsSql, ReadLocation);
 
@@ -93,6 +106,15 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
         reader.GetInt32(5),
         reader.GetInt32(6),
         reader.GetString(7));
+
+    private static ProductRow ReadProduct(SqliteDataReader reader) => new(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetDouble(3),
+        reader.GetInt64(4) == 1,
+        reader.GetString(5),
+        reader.GetInt32(6));
 
     private static LocationRow ReadLocation(SqliteDataReader reader) => new(
         reader.GetString(0),

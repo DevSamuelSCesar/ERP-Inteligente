@@ -33,6 +33,10 @@
                     IsVisible="{Binding IsBusy}">
             <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14" />
             <TextBlock Classes="secondary" Text="{Binding StatusText}" VerticalAlignment="Center" />
+            <Button Classes="neutral" Command="{Binding CancelCommand}" ToolTip.Tip="Cancelar o pedido (Esc)"
+                    HotKey="Escape" Margin="6,0,0,0">
+                <TextBlock Text="Cancelar" />
+            </Button>
         </StackPanel>
 
         <Rectangle Grid.Row="3" Classes="rule" />

@@ -5,6 +5,13 @@ using System.Text.Json.Nodes;
 
 namespace erp_inteligente.Models;
 
+/// <summary>Who wrote a draft: the operator in "Novo plano" or the Planner. A draft of the AI runs with AI ∩ user rights.</summary>
+public enum PlanOrigin
+{
+    User,
+    Ai,
+}
+
 /// <summary>One step of a draft: a catalog operation, its arguments and an optional result name for <c>$references</c>.</summary>
 public sealed record PlanDraftStep(string Op, IReadOnlyDictionary<string, object?> Args, string? As = null);
 
@@ -16,17 +23,31 @@ public sealed class PlanDraft
 {
     public const string DslVersion = "1.0";
 
-    private PlanDraft(string json) => Json = json;
+    private PlanDraft(string json, PlanOrigin origin, string? skill)
+    {
+        Json = json;
+        Origin = origin;
+        Skill = skill;
+    }
 
     /// <summary>The DSL document exactly as it will be validated and stored in <c>plans.plan_json</c>.</summary>
     public string Json { get; }
 
+    public PlanOrigin Origin { get; }
+
+    /// <summary>The <c>skill</c> field when it is a string, for display only; the engine validates it.</summary>
+    public string? Skill { get; }
+
     /// <summary>Wraps a DSL document received as text (e.g. from the Planner); only JSON syntax is checked here.</summary>
-    public static PlanDraft FromJson(string json)
+    public static PlanDraft FromJson(string json, PlanOrigin origin = PlanOrigin.User)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        using var _ = JsonDocument.Parse(json);
-        return new PlanDraft(json);
+        using var document = JsonDocument.Parse(json);
+        var skill = document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("skill", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+        return new PlanDraft(json, origin, skill);
     }
 
     /// <summary>Builds a DSL v1 document from typed steps.</summary>
@@ -51,6 +72,6 @@ public sealed class PlanDraft
             ["skill"] = skill,
             ["steps"] = array,
         };
-        return new PlanDraft(document.ToJsonString());
+        return new PlanDraft(document.ToJsonString(), PlanOrigin.User, skill);
     }
 }

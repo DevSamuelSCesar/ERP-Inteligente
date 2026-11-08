@@ -8,6 +8,13 @@ public sealed record StockRow(string Sku, string Product, string Location, strin
     public string ExpiresOnText => ExpiresOn?.ToString("dd/MM/yyyy") ?? "";
 }
 
+/// <summary>A catalog product (global) with its balance in the session's warehouse. The unit cost is never shown here.</summary>
+public sealed record ProductRow(string Sku, string Name, string Unit, double? WeightKg, bool TracksExpiry, string Description, int Balance)
+{
+    public string WeightText => WeightKg is { } kg ? $"{kg:0.###} kg" : "";
+    public string TracksExpiryText => TracksExpiry ? "Sim" : "Não";
+}
+
 public sealed record LocationRow(string Code, string Zone, int Capacity, int Occupied)
 {
     public int Free => Capacity - Occupied;

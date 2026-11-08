@@ -5,8 +5,11 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using erp_inteligente;
+using erp_inteligente.Core.Llm;
 using erp_inteligente.ViewModels;
 using erp_inteligente.Views;
+
+using Nexus.Tests.Fakes;
 
 namespace Nexus.Tests;
 
@@ -34,9 +37,14 @@ public class HeadlessUiTests
     }
 
     [AvaloniaFact]
-    public async Task Nexus_answers_stock_question_from_the_database()
+    public async Task Nexus_answers_stock_question_through_the_planner_tools()
     {
-        using var app = new TestApp();
+        var llm = new ScriptedLlmProvider()
+            .Call("get_stock", "{\"sku\":\"ABC-123\"}")
+            .Then(r => new LlmResponse(
+                r.Messages[^1].Content!.Contains("DOCA-01") ? "ABC-123: 40 cx em DOCA-01." : "sem dados",
+                [], null, LlmFinishReason.Stop, new LlmUsage(10, 5)));
+        using var app = new TestApp(llm: llm);
         var shell = await app.ShellForAsync("op.joao");
         var window = new MainWindow { DataContext = shell };
         window.Show();
@@ -46,9 +54,56 @@ public class HeadlessUiTests
         await nexus.SendCommand.ExecuteAsync(null);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Contains(window.GetVisualDescendants().OfType<SelectableTextBlock>(), t => t.Text?.Contains("DOCA-01") == true);
-        Assert.DoesNotContain(window.GetVisualDescendants(), v => v is PlanBoardView);
+        Assert.Contains(window.GetVisualDescendants().OfType<SelectableTextBlock>(), t => t.Text == "ABC-123: 40 cx em DOCA-01.");
+        Assert.DoesNotContain(window.GetVisualDescendants(), v => v is PlanBoardView or DraftPlanView);
         window.Close();
+    }
+
+    /// <summary>The Planner proposes a move; nothing is written until op.joao confirms, then the plan runs as planned by the AI.</summary>
+    [AvaloniaFact]
+    public async Task Nexus_proposal_is_written_only_after_confirmation()
+    {
+        const string plan =
+            "{\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" +
+            "{\"op\":\"move_stock\",\"args\":{\"sku\":\"ABC-123\",\"qty\":40,\"from\":\"DOCA-01\",\"to\":\"A-02-01\"}}]}}";
+        var llm = new ScriptedLlmProvider().Call("submit_plan", plan);
+        using var app = new TestApp(llm: llm);
+        var shell = await app.ShellForAsync("op.joao");
+        var window = new MainWindow { DataContext = shell };
+        window.Show();
+        var nexus = Assert.IsType<NexusViewModel>(shell.CurrentPage);
+        long Plans() => Scalar(app, "SELECT COUNT(*) FROM plans");
+        var before = Plans();
+        long AiExecuted() => Scalar(app, "SELECT COUNT(*) FROM plans WHERE planned_by = 'ai' AND status = 'executed'");
+        var aiBefore = AiExecuted();
+
+        nexus.Draft = "guarde as 40 caixas do ABC-123 da doca em A-02-01";
+        await nexus.SendCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+
+        var card = Assert.Single(window.GetVisualDescendants().OfType<DraftPlanView>());
+        var proposal = Assert.IsType<DraftPlanViewModel>(card.DataContext);
+        Assert.Equal(before, Plans());
+        Assert.False(nexus.IsInputEnabled);
+        Assert.Contains(card.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Efeito simulado");
+
+        await proposal.ConfirmCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+
+        var board = Assert.IsType<PlanBoardViewModel>(Assert.Single(window.GetVisualDescendants().OfType<PlanBoardView>()).DataContext);
+        Assert.True(board.IsExecuted);
+        Assert.Equal(before + 1, Plans());
+        Assert.Equal(aiBefore + 1, AiExecuted());
+        Assert.True(nexus.IsInputEnabled);
+        window.Close();
+    }
+
+    private static long Scalar(TestApp app, string sql)
+    {
+        using var connection = app.Host.Database.OpenApplication();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)command.ExecuteScalar()!;
     }
 
     /// <summary>

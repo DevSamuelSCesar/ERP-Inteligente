@@ -19,8 +19,11 @@ O app C# (Avalonia, MVVM com CommunityToolkit.Mvvm) tem a interface completa e o
 - `Engine`: motor de planos (feature 2).
   - DSL v1 (`DslParser`) e JSON Schemas em `Core/Engine/Schemas/v1`.
   - Regras por operação (`*Handler`), `PlanSimulator` (rollback), `PlanExecutor` e `PlanEngine` (máquina de estados).
+  - Planos com origem `ai` rodam com os direitos IA ∩ usuário.
+- `Llm`: `ILlmProvider` e `DeepSeekProvider` (URL fixa). `LlmSettings` guarda a chave e o modelo no cofre do SO (feature 3).
+- `Planner`: laço de tool calling, ferramentas de leitura sobre `v_ai_*`, `submit_plan` (só prévia) e o prompt de sistema em `Core/Planner/Prompts/system.md`.
 
-`AppHost` compõe o núcleo e `AppController` alterna entre login e shell. As telas leem o banco real por `Services/Sqlite/` (`EnginePlanService` liga a UI ao motor). Planos são montados na tela "Novo plano"; o Nexus só consulta até o Planner (feature 3).
+`AppHost` compõe o núcleo e `AppController` alterna entre login e shell. As telas leem o banco real por `Services/Sqlite/` (`EnginePlanService` liga a UI ao motor e `PlannerNexusService` liga o chat ao Planner). Planos são montados na tela "Novo plano" ou propostos pelo Nexus. Uma proposta só é gravada quando quem pediu clica em Confirmar. A chave da DeepSeek é digitada pelo administrador em Configurações. Os testes nunca chamam a API real: usam `ScriptedLlmProvider` (`tests/Nexus.Tests/Fakes`) e um `HttpMessageHandler` falso.
 
 Mudanças de schema exigem uma migração em `db/migrations/NNN_*.sql`, além de `schema.sql`/`security.sql`:
 - registre a migração em `DatabaseBootstrapper.Migrations` e aumente `SchemaVersion`;

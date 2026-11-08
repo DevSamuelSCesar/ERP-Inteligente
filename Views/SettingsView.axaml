@@ -4,20 +4,86 @@
              xmlns:m="using:erp_inteligente.Models"
              x:Class="erp_inteligente.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
-    <StackPanel>
-        <Rectangle Classes="rule" />
-        <ItemsControl ItemsSource="{Binding Fields}">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="m:SummaryTotal">
-                    <StackPanel>
-                        <Grid ColumnDefinitions="200,*" Margin="0,10">
-                            <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Center" />
-                            <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" />
-                        </Grid>
-                        <Rectangle Classes="rule" />
+    <ScrollViewer>
+        <StackPanel>
+            <Rectangle Classes="rule" />
+            <ItemsControl ItemsSource="{Binding Fields}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="m:SummaryTotal">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="200,*" Margin="0,10">
+                                <TextBlock Classes="label" Text="{Binding Label}" VerticalAlignment="Center" />
+                                <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" />
+                            </Grid>
+                            <Rectangle Classes="rule" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- LLM provider: the key lives in the OS key store and is never shown again -->
+            <StackPanel IsVisible="{Binding HasLlm}">
+                <TextBlock Classes="boardTitle" Text="Provedor de LLM" Margin="0,22,0,10" />
+                <Rectangle Classes="rule" />
+
+                <Grid ColumnDefinitions="200,*" Margin="0,10">
+                    <TextBlock Classes="label" Text="Provedor" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding ProviderName}" />
+                </Grid>
+                <Rectangle Classes="rule" />
+
+                <Grid ColumnDefinitions="200,*" Margin="0,10">
+                    <TextBlock Classes="label" Text="Chave de API" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14"
+                                  IsVisible="{Binding IsKeyConfigured}" />
+                        <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Width="14" Height="14"
+                                  IsVisible="{Binding !IsKeyConfigured}" />
+                        <TextBlock Text="{Binding KeyStatusText}" VerticalAlignment="Center" TextWrapping="Wrap" />
                     </StackPanel>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
-    </StackPanel>
+                </Grid>
+                <Rectangle Classes="rule" />
+
+                <StackPanel IsVisible="{Binding CanConfigure}">
+                    <Grid ColumnDefinitions="200,Auto,Auto,Auto" Margin="0,10">
+                        <TextBlock Classes="label" Text="Nova chave" VerticalAlignment="Center" />
+                        <TextBox Name="ApiKeyBox" Grid.Column="1" Width="420"
+                                 Text="{Binding ApiKey}" PasswordChar="●" MaxLength="200" PlaceholderText="sk-..."
+                                 IsEnabled="{Binding !IsWorking}" />
+                        <Button Grid.Column="2" Classes="primary" Margin="10,0,0,0" Command="{Binding SaveKeyCommand}"
+                                ToolTip.Tip="Salvar no cofre do sistema (Alt+S)">
+                            <AccessText Text="_Salvar" />
+                        </Button>
+                        <Button Grid.Column="3" Classes="neutral" Margin="8,0,0,0" Command="{Binding ClearKeyCommand}"
+                                ToolTip.Tip="Remover a chave do cofre">
+                            <TextBlock Text="Remover" />
+                        </Button>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="200,Auto,Auto" Margin="0,10">
+                        <TextBlock Classes="label" Text="Modelo" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="1" MinWidth="220" ItemsSource="{Binding Models}"
+                                  SelectedItem="{Binding SelectedModel}" IsEnabled="{Binding !IsWorking}" />
+                        <Button Grid.Column="2" Classes="neutral" Margin="10,0,0,0" Command="{Binding TestCommand}"
+                                ToolTip.Tip="Faz uma chamada mínima à DeepSeek (Alt+T)">
+                            <AccessText Text="_Testar conexão" />
+                        </Button>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+                </StackPanel>
+
+                <!-- Feedback: a line with icon and text, never a toast -->
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="200,10,0,0">
+                    <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14"
+                              IsVisible="{Binding IsWorking}" />
+                    <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14"
+                              IsVisible="{Binding FeedbackIsSuccess}" />
+                    <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14"
+                              IsVisible="{Binding FeedbackIsError}" />
+                    <TextBlock Text="{Binding Feedback}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>

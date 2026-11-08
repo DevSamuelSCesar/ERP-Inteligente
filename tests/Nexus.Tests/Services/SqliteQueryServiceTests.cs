@@ -76,6 +76,38 @@ public class SqliteQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Products_list_the_catalog_with_the_warehouse_balance()
+    {
+        var rows = await _queries.GetProductsAsync();
+
+        Assert.Equal(rows.Select(r => r.Sku).OrderBy(s => s, StringComparer.Ordinal), rows.Select(r => r.Sku));
+        var abc = rows.Single(r => r.Sku == "ABC-123");
+        var expected = (await _queries.GetStockAsync()).Where(r => r.Sku == "ABC-123").Sum(r => r.Quantity);
+        Assert.Equal(("Caixa de parafusos 4mm", "cx", expected), (abc.Name, abc.Unit, abc.Balance));
+    }
+
+    [Fact]
+    public async Task Product_created_without_stock_is_listed_with_zero_balance()
+    {
+        _f.Exec("INSERT INTO products (sku, name, unit, tracks_expiry, unit_cost_enc) VALUES ('XYZ-001', 'Parafuso sextavado', 'cx', 1, X'01')");
+
+        var row = (await _queries.GetProductsAsync()).Single(r => r.Sku == "XYZ-001");
+
+        Assert.Equal((0, true, "Sim", ""), (row.Balance, row.TracksExpiry, row.TracksExpiryText, row.WeightText));
+    }
+
+    [Fact]
+    public async Task Product_balance_ignores_other_warehouses()
+    {
+        var before = (await _queries.GetProductsAsync()).Single(r => r.Sku == "ABC-123").Balance;
+        SqliteTestData.AddSecondWarehouse(_f);
+
+        Assert.Equal(before, (await _queries.GetProductsAsync()).Single(r => r.Sku == "ABC-123").Balance);
+        _session.Current = _f.SessionFor("op.ana");
+        Assert.Equal(99, (await _queries.GetProductsAsync()).Single(r => r.Sku == "ABC-123").Balance);
+    }
+
+    [Fact]
     public async Task Locations_list_every_location_with_zone_capacity_and_occupancy()
     {
         var rows = await _queries.GetLocationsAsync();

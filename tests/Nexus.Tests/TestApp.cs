@@ -1,9 +1,11 @@
 using erp_inteligente;
 using erp_inteligente.Core.Auth;
+using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Security;
 using erp_inteligente.Models;
 using erp_inteligente.ViewModels;
 using Nexus.Tests.Core;
+using Nexus.Tests.Fakes;
 
 namespace Nexus.Tests;
 
@@ -17,11 +19,15 @@ public sealed class TestApp : IDisposable
 
     private readonly TestDatabase _db = new();
 
-    public TestApp(TimeProvider? time = null)
+    public TestApp(TimeProvider? time = null, ILlmProvider? llm = null)
     {
         Time = time ?? new ManualTimeProvider(new DateTimeOffset(2026, 11, 7, 12, 0, 0, TimeSpan.Zero));
-        Host = new AppHost(_db.Database, Time, new Argon2Parameters(1024, 1, 1), AuthOptions.Default);
+        Llm = llm ?? new ScriptedLlmProvider();
+        Host = new AppHost(_db.Database, Time, new Argon2Parameters(1024, 1, 1), AuthOptions.Default, _db.Store, Llm);
     }
+
+    public ILlmProvider Llm { get; }
+    public InMemorySecretStore Store => _db.Store;
 
     public TimeProvider Time { get; }
     public AppHost Host { get; }

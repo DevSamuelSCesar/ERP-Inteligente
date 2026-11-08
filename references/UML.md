@@ -151,41 +151,59 @@ classDiagram
 classDiagram
     class ILlmProvider {
         <<interface>>
-        +ChatAsync(request) Task~LlmResponse~
-        +CountTokensAsync(request) Task~int~
+        +CompleteAsync(LlmRequest request) Task~LlmResponse~
     }
-    class AnthropicProvider
-    class OpenAiCompatibleProvider {
-        +Uri BaseUrl
+    class DeepSeekProvider {
+        -string Endpoint
+        +TestConnectionAsync() Task
     }
-    ILlmProvider <|.. AnthropicProvider
-    ILlmProvider <|.. OpenAiCompatibleProvider : OpenAI e DeepSeek
+    class LlmSettings {
+        +bool IsConfigured
+        +string Model
+        +SetKey(string key)
+        +ClearKey()
+    }
+    ILlmProvider <|.. DeepSeekProvider : feature 3
+    DeepSeekProvider --> LlmSettings : chave no cofre do SO
 
     class Planner {
-        +PlanAsync(UserRequest request) Task~PlanResult~
+        +RunAsync(UserSession user, PlannerTurn[] history, string request) Task~PlannerResult~
     }
+    class PlannerResult {
+        <<abstract>>
+    }
+    class PlannerAnswer
+    class PlannerProposal {
+        +PlanDraft Draft
+        +EnginePreview Preview
+    }
+    class PlannerEscalated
+    class PlannerFailed
+    PlannerResult <|-- PlannerAnswer
+    PlannerResult <|-- PlannerProposal
+    PlannerResult <|-- PlannerEscalated
+    PlannerResult <|-- PlannerFailed
+    class PlannerTools {
+        +search_products()
+        +get_product()
+        +get_stock()
+        +find_location()
+        +list_inbound_orders()
+        +list_outbound_orders()
+    }
+    class AiReadConnection {
+        +Authorize(action, table, column, view) AuthorizerResult
+    }
+    class PlanEngine {
+        +Preview(user, planJson, plannedBy) EnginePreview
+    }
+
     class RecipeMatcher {
         +MatchAsync(UserRequest request) Task~Plan?~
     }
     class SkillRegistry {
         +Index() SkillSummary[]
         +Load(string name) Skill
-    }
-    class Skill {
-        +string Name
-        +string Version
-        +string Instructions
-        +string[] AllowedTools
-        +string[] AllowedOperations
-    }
-    class IReadTool {
-        <<interface>>
-        +string Name
-        +JsonSchema InputSchema
-        +ExecuteAsync(JsonElement args) Task~JsonElement~
-    }
-    class AiReadConnection {
-        +Authorize(action, table, column, view) AuthorizerResult
     }
     class KnowledgeRetriever {
         +SearchAsync(string query, int k) Task~Chunk[]~
@@ -194,19 +212,16 @@ classDiagram
         +SearchAsync(string query, Scope scope) Task~Memory[]~
         +RememberAsync(Memory candidate) Task
     }
-    class MemoryFilter {
-        +IsAcceptable(Memory candidate) bool
-    }
 
     Planner --> ILlmProvider
-    Planner --> SkillRegistry
-    Planner --> IReadTool
-    Planner --> KnowledgeRetriever
-    Planner --> MemoryStore
-    RecipeMatcher --> ILlmProvider
-    SkillRegistry --> Skill
-    IReadTool --> AiReadConnection
-    MemoryStore --> MemoryFilter
+    Planner --> PlannerTools : leitura
+    Planner --> PlanEngine : submit_plan (só simula)
+    Planner ..> PlannerResult
+    PlannerTools --> AiReadConnection
+    Planner ..> SkillRegistry : feature 4
+    Planner ..> KnowledgeRetriever : feature 5
+    Planner ..> MemoryStore : feature 5
+    RecipeMatcher ..> ILlmProvider : feature 7
 ```
 
 ## 4. Classes do motor de planos e segurança

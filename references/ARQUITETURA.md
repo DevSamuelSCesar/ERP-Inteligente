@@ -75,7 +75,7 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 5. **Planejamento:** o LLM consulta o estado com ferramentas de leitura e chama `submit_plan`.
 6. **Validação:** se o plano for inválido, o erro volta ao LLM em formato estruturado para ser corrigido, com limite de tentativas. Ao atingir o limite, a tarefa é escalada ao operador.
 7. **Simulação:** o dry-run calcula o efeito (o que entra, o que sai e o que muda de endereço) e o nível de risco do plano.
-8. **Aprovação:** um plano de risco crítico é mostrado ao operador em linguagem de negócio para confirmação. Os demais seguem direto.
+8. **Confirmação e aprovação:** o plano montado pela IA volta ao chat como **proposta** (validada e simulada, nada gravado). Quem pediu confirma ou descarta. Ao confirmar, um plano reversível segue direto; um plano de risco crítico é mostrado a um supervisor em linguagem de negócio para aprovação.
 9. **Execução:** o Executor aplica todos os passos numa transação. Se qualquer passo falhar, nada é gravado.
 10. **Aprendizado:** o resultado é registrado; memórias e receitas são atualizadas (seções 7 e 8).
 
@@ -156,6 +156,31 @@ O risco do plano é o **maior risco** entre seus passos.
 
 A skill ativa define quais consultas e quais operações do catálogo ficam disponíveis.
 
+**Implementado na feature 3 (`Core/Planner`):**
+- **Ferramentas de leitura:** `search_products`, `get_product`, `get_stock`, `find_location`, `list_inbound_orders`, `list_outbound_orders` e `submit_plan`. As de memória, receitas e skills chegam nas features 4, 5 e 7.
+  - Cada ferramenta tem JSON Schema próprio (`additionalProperties: false`), validado antes de tocar o banco.
+  - Rodam na conexão de leitura da IA, sempre filtradas pelo armazém da sessão.
+  - Devolvem no máximo 50 linhas e 8 KB.
+  - Só aparecem as ferramentas permitidas pelo direito IA ∩ usuário.
+- **Pesquisa robusta:** toda entidade que a IA precisa encontrar ganha uma ferramenta de pesquisa, não só busca por chave exata.
+  - `search_products` aceita nome, descrição ou SKU completo ou parcial (`ABC`, `abc123`), ou nenhum argumento para listar tudo.
+  - Ignora maiúsculas e acentos e exige todos os termos.
+  - Filtra por saldo no armazém (`has_stock`), controle de validade e unidade.
+  - Ordena por relevância e pagina com `limit`/`offset`, devolvendo `total` e `has_more`.
+  - O texto do usuário vira só parâmetros: `%` e `_` separam termos e nunca viram curinga.
+  - O custo unitário nunca é lido.
+- **Delimitação:** o resultado de cada ferramenta volta ao LLM entre `<dados fonte="tool:…">…</dados>`, com `<` e `>` escapados, e o prompt de sistema manda tratá-lo como dado.
+- **Auditoria:** cada chamada é auditada como `ai.tool` (permitida ou negada), em nome do usuário.
+- **`submit_plan`:** só chama a prévia do motor (`Preview` com origem `ai`) e não grava nada.
+  - Um plano inválido volta como `[{step, field, code, message}]`.
+  - Um plano válido encerra o laço e vira a **proposta** do chat.
+- **Limites por pedido:**
+  - 3 planos inválidos;
+  - 8 rodadas com o LLM e até 8 chamadas de ferramenta por rodada;
+  - 8.192 tokens por chamada e 60.000 por pedido;
+  - ao estourar um limite, a tarefa é **escalada** ao operador.
+- **Histórico:** os últimos 10 pedidos e respostas da sessão ficam só em memória, nunca no banco.
+
 ---
 
 ## 7. Receitas
@@ -227,7 +252,12 @@ skills/
 
 ## 10. Provedores de LLM
 
-- Interface única `ILlmProvider` (chat, tool calling, streaming e contagem de tokens) com adaptadores para **Claude**, **OpenAI** e **DeepSeek**. A API da DeepSeek é compatível com a da OpenAI.
+- Interface única `ILlmProvider` (chat com tool calling) com adaptadores para **Claude**, **OpenAI** e **DeepSeek**. A API da DeepSeek é compatível com a da OpenAI.
+- **Estado (feature 3):** só a DeepSeek está implementada (`Core/Llm/DeepSeekProvider`), sem streaming, porque a UI mostra a resposta completa.
+  - **Endereço:** fixo no código (`https://api.deepseek.com`), só HTTPS e sem seguir redirecionamentos, para a chave não poder ir a outro host.
+  - **Tempo e tentativas:** 60 s por tentativa e até 2 novas tentativas, só para 429 e 5xx.
+  - **Raciocínio:** no modo de raciocínio da DeepSeek, o `reasoning_content` de cada resposta é devolvido nas chamadas seguintes, como a API exige quando há ferramentas.
+  - **Modelos:** `deepseek-v4-pro` (padrão) e `deepseek-flash`, escolhidos em Configurações.
 - **Modelo por papel:** um modelo barato para identificar receitas e extrair parâmetros, e um modelo forte para planejar e tratar exceções. Ambos são configuráveis.
 
 | Papel | Modelo padrão | Alternativas suportadas |
@@ -239,6 +269,8 @@ skills/
 A justificativa e o custo por 1.000 usos estão em [`IA.md`](IA.md).
 
 - As chaves de API ficam no armazenamento seguro do sistema operacional, nunca no SQLite nem no repositório.
+  - A chave da DeepSeek é digitada no app, em Configurações, só por quem tem `user.manage` (administrador). O campo é mascarado e a chave nunca é reexibida.
+  - Fica no cofre na entrada `llm.deepseek.key` do banco. Salvar, remover e trocar o modelo geram auditoria sem o valor.
 
 ### 10.1 Fine-tuning
 
@@ -322,6 +354,8 @@ A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DA
 - **Papéis e permissões** em `role_permissions`, com efeito `ALLOW` ou `DENY`. A regra é *deny-overrides*: um `DENY` sempre vence. A view `v_effective_permissions` calcula o resultado.
 - **Escopo por linha (equivalente a RLS):** toda consulta da aplicação recebe o `warehouse_id` do usuário como parâmetro; um usuário nunca lê nem altera dados de outro armazém.
 - **A IA age em nome de alguém:** o direito efetivo da IA é a **interseção** entre o papel `agente_ia` e o papel de quem fez o pedido. Ela nunca tem mais permissão do que a pessoa.
+  - O motor aplica a interseção a todo plano com `planned_by = 'ai'`: na prévia, no envio e de novo na aprovação.
+  - Pelo seed, a IA não tem `stock.adjust` (DENY) nem `location.manage`. Ajustes e cadastro de endereço são feitos pela tela "Novo plano".
 - **Segregação de funções:** quem pede uma operação crítica não pode aprová-la, e a IA nunca aprova.
 - A matriz completa de papéis, com os pontos de `DENY`, está em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md).
 

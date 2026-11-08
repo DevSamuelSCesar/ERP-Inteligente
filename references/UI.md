@@ -98,7 +98,8 @@ O Nexus é onde o operador interage com o sistema: pede em linguagem natural, ac
 - **Transcrição** no meio, em toda a largura, com rolagem e entradas em ordem cronológica. Cada entrada tem a hora e o autor (usuário ou Nexus) à esquerda e o conteúdo à direita. Não há balões, avatares nem alinhamento à direita para o usuário.
 - As respostas do Nexus são **curtas e em texto simples**. O que é estruturado vira controle nativo: quadro do plano (seção 5) e resumo visual (seção 6). Markdown nunca é renderizado.
 - A resposta aparece **completa** quando pronta, sem streaming caractere a caractere. Enquanto isso, a **linha de estado** da tarefa (abaixo da última entrada) mostra o que está acontecendo.
-- **Entrada** fixa no rodapé: campo de texto em toda a largura e o botão primário **Enviar**. Enter envia e Shift+Enter quebra a linha. O campo fica desabilitado enquanto um plano aguarda a decisão do próprio usuário.
+- **Entrada** fixa no rodapé: campo de texto em toda a largura e o botão primário **Enviar**. Enter envia e Shift+Enter quebra a linha. O campo fica desabilitado enquanto uma proposta aguarda a decisão do próprio usuário.
+- Durante uma tarefa, a linha de estado tem o botão **Cancelar** (Esc), que interrompe a chamada ao provedor; nada foi gravado nesse ponto.
 - O texto da transcrição pode ser selecionado e copiado (`SelectableTextBlock`).
 
 ### 4.1 Estados de uma tarefa
@@ -109,6 +110,7 @@ Cada pedido gera uma tarefa que aparece na conversa com o seu estado atual. Os e
 |--------------|-----------------|---------------|
 | Consultando | — | Linha de estado com ⟳ e a consulta em andamento ("Consultando saldo do ABC-123") |
 | Planejando / validando | `validating` | Linha de estado com ⟳; correções do Validator não aparecem ao operador, a menos que o limite de tentativas seja atingido |
+| Proposta | — (nada gravado) | Quadro da proposta com o efeito simulado e **Confirmar / Descartar** para quem pediu (seção 5.1) |
 | Aguardando aprovação | `pending_approval` | Quadro do plano com o prompt de aprovação (seção 5) |
 | Executado | `executed` | Resumo visual (seção 6) |
 | Rejeitado | `rejected` | Quadro do plano marcado como rejeitado, com o motivo |
@@ -148,6 +150,16 @@ Depois que a IA planeja e o Simulator calcula o efeito, o Nexus mostra o **quadr
   - **✗ Rejeitar:** botão neutro com contorno, nunca vermelho, porque rejeitar é uma decisão legítima e não um erro.
   - **Plano crítico:** régua superior de 2 px e o texto "⚠ crítico" em `StatusWarning` (âmbar), porque risco não é erro.
 
+### 5.1 Proposta do Nexus (confirmação de quem pediu)
+
+O plano montado pela IA chega primeiro como **proposta**: o motor já o validou e simulou, mas nada foi gravado.
+
+- O quadro é o mesmo da seção 5, com o título "Proposta do Nexus · skill", as linhas do plano e o **efeito simulado** (os mesmos visuais do resumo da seção 6).
+- O rodapé pergunta "Confirmar?" com **✓ Confirmar** (Alt+C, `StatusSuccess`) e **Descartar** (Alt+D, contorno neutro, nunca vermelho).
+- **Confirmar** envia o plano ao motor com origem `ai` (direitos IA ∩ usuário). Um plano reversível executa e aparece o quadro do plano com o resumo. Um plano crítico vai para a aprovação de um supervisor (seção 5).
+- **Descartar** encerra a proposta só para leitura, com "Descartado. Nada foi gravado."
+- Configurar o provedor é feito em Configurações, seção "Provedor de LLM": só o administrador digita a chave (campo mascarado, nunca reexibida) e escolhe o modelo; os demais veem só se há chave.
+
 ---
 
 ## 6. Resumo visual pós-execução
@@ -178,7 +190,7 @@ As visualizações usam só a paleta de dados (`Data1`–`Data5`, seção 9.4). 
 
 ## 7. Telas de consulta
 
-Estoque, Endereços, Pedidos, Planos, Receitas e Auditoria seguem a mesma estrutura dentro do container (referência TOTVS, só estrutura):
+Estoque, Produtos, Endereços, Pedidos, Planos, Receitas e Auditoria seguem a mesma estrutura dentro do container (referência TOTVS, só estrutura):
 
 ```
 Título da tela
@@ -192,6 +204,7 @@ ABC-123  Caixa padrão       A-03-02    L2410    20
 ```
 
 - **Título**, depois **abas ou filtros**, depois a **faixa de totais** e, por fim, a **tabela (`DataGrid`) ou o gráfico** principal, em toda a largura.
+- **Produtos** lista o catálogo inteiro, inclusive produtos recém-cadastrados ainda sem saldo, com o saldo no armazém do usuário. O custo unitário (dado sensível) nunca aparece nessa tela.
 - As telas de consulta são **somente leitura**. Qualquer alteração de dados passa pelo Nexus (plano) ou por uma receita disparada pela UI, que gera um plano validado da mesma forma (seção 7 de [`ARQUITETURA.md`](ARQUITETURA.md)).
 - As tabelas são `DataGrid` virtualizadas, com cabeçalho fixo, ordenação, colunas redimensionáveis, navegação por setas e linhas de ~28 px. Não há paginação de site nem "carregar mais". Os filtros vêm de listas fixas (seção 12.9 de [`ARQUITETURA.md`](ARQUITETURA.md)).
 

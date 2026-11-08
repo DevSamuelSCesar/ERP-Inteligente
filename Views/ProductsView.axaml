@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.ProductsView"
+             x:DataType="vm:ProductsViewModel">
+
+    <!-- Read-only query screen: filter, totals strip, DataGrid (references/UI.md, section 7); no unit cost -->
+    <Grid RowDefinitions="Auto,Auto,*">
+        <TextBox Grid.Row="0" Width="400" HorizontalAlignment="Left"
+                 Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
+        <StackPanel Grid.Row="1" Margin="0,12,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}">
+            <DataGrid.Columns>
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="SKU" Binding="{Binding Sku}" Width="100" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Nome" Binding="{Binding Name}" Width="2*" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Unidade" Binding="{Binding Unit}" Width="95" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Peso" Binding="{Binding WeightText}" Width="90" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Validade" Binding="{Binding TracksExpiryText}" Width="95" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Saldo no armazém" Binding="{Binding Balance}" Width="160" />
+                <DataGridTextColumn x:DataType="m:ProductRow" Header="Descrição" Binding="{Binding Description}" Width="3*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

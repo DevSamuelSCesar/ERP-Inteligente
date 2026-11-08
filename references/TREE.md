@@ -21,26 +21,28 @@ erp_inteligente/
 │   ├── Icons.axaml   # Ícones próprios em StreamGeometry (navegação, ações, estados)
 │   ├── ButtonTheme.axaml  # ControlTheme próprio do Button (substitui o do Fluent, sem sobreposição translúcida)
 │   └── Controls.axaml  # Estilos: botões, navegação, abas, réguas, quadros, DataGrid; sem sombras nem transições
-├── Core/             # Núcleo da feature 1 do ROADMAP (seção 12 da ARQUITETURA)
+├── Core/             # Núcleo das features 1 a 3 do ROADMAP (seção 12 da ARQUITETURA)
 │   ├── Security/     # Cofre do SO (libsecret, DPAPI, memória), KeyManager, DatabaseKeys, ColumnCipher (AES-GCM), PasswordHasher (Argon2id)
 │   ├── Data/         # NexusDatabase (3 conexões SQLCipher), AiAuthorizer, DatabaseBootstrapper (cria o banco a partir de db/*.sql)
 │   ├── Audit/        # AuditEntry, AuditHasher (regra v1), AuditLog (append encadeado), AuditVerifier
 │   ├── Auth/         # AuthService (login, bloqueio, auditoria), SessionService (expiração por inatividade), LoginResult
 │   ├── Policy/       # PolicyEngine (deny-overrides, interseção IA ∩ usuário), ApplicationDb (consultas com permissão e $warehouse_id)
-│   └── Engine/       # Motor de planos: DSL v1, catálogo, Schemas/v1 (JSON Schema), regras por operação, Simulator, Executor, PlanEngine
+│   ├── Engine/       # Motor de planos: DSL v1, catálogo, Schemas/v1 (JSON Schema), regras por operação, Simulator, Executor, PlanEngine (direitos IA ∩ usuário para planos da IA)
+│   ├── Llm/          # Camada de provedores de LLM: ILlmProvider e modelos (LlmModels), DeepSeekProvider (HTTPS fixo, retries, timeout), LlmSettings (chave e modelo no cofre do SO)
+│   └── Planner/      # Planner (feature 3): Planner (laço LLM com ferramentas), PlannerTools (consultas validadas na conexão da IA), PlannerProductSearch (search_products: texto livre, SKU parcial, filtros, ranking, paginação), PlannerModels (resultados e limites), Prompts/system.md (prompt de sistema embutido)
 ├── Models/           # Plano, passos, status, resumo de execução, sessão, permissões e linhas das consultas
-├── Services/         # Interfaces da UI com o núcleo (planos, Nexus, consultas, sessão, diálogos) e ApprovalPolicy
-│   └── Sqlite/       # Implementações reais: consultas por armazém, planos pelo motor (EnginePlanService), Nexus só de consulta
-├── ViewModels/       # Login, shell e navegação, Nexus, Novo plano, quadro do plano, resumo visual, telas de consulta, Planos, diálogo
-├── Views/            # Login, erro fatal, janela principal, Nexus, Novo plano, quadro do plano, resumo, telas de consulta, diálogo de rejeição
+├── Services/         # Interfaces da UI com o núcleo (planos, Nexus, consultas, sessão, diálogos), ApprovalPolicy e LlmSettingsService (chave da DeepSeek só pelo administrador)
+│   └── Sqlite/       # Implementações reais: consultas por armazém, planos pelo motor (EnginePlanService), Nexus pelo Planner (PlannerNexusService)
+├── ViewModels/       # Login, shell e navegação, Nexus, proposta do Nexus (DraftPlanViewModel), Novo plano, quadro do plano, resumo visual, telas de consulta (Estoque, Produtos, Endereços, Pedidos, Receitas, Auditoria), Planos, Configurações, diálogo
+├── Views/            # Login, erro fatal, janela principal, Nexus, proposta do Nexus (Confirmar/Descartar), Novo plano, quadro do plano, resumo, telas de consulta (incl. Produtos), Configurações (provedor de LLM), diálogo de rejeição
 │   └── Converters/   # IconKeyConverter (chave de ícone → geometria)
 ├── tests/
 │   └── Nexus.Tests/  # xUnit v3 + Avalonia Headless (Skia real)
-│       ├── Core/     # Testes do núcleo por módulo (incl. Engine) + TestDatabase e ManualTimeProvider; Data/Fixtures: scripts da versão 1 do schema
-│       ├── Services/ # Testes dos serviços Sqlite (consultas, planos, Nexus, isolamento entre armazéns)
-│       ├── Fakes/    # Serviços em memória (antigos serviços de demonstração) para testar ViewModels do quadro de aprovação
+│       ├── Core/     # Testes do núcleo por módulo (incl. Engine, Llm e Planner) + TestDatabase e ManualTimeProvider; Data/Fixtures: scripts da versão 1 do schema
+│       ├── Services/ # Testes dos serviços Sqlite (consultas, planos, isolamento entre armazéns)
+│       ├── Fakes/    # Serviços em memória (antigos serviços de demonstração) e ScriptedLlmProvider (LLM roteirizado; os testes nunca chamam a API real)
 │       ├── TestApp.cs  # AppHost real sobre um TestDatabase, com login dos usuários do seed
-│       └── *.cs      # Fluxo login/shell/expiração, UI headless, ViewModels, contraste das cores, política de aprovação
+│       └── *.cs      # Fluxo login/shell/expiração, UI headless (incl. proposta do Nexus), ViewModels, Configurações, contraste das cores, política de aprovação
 ├── ROADMAP.md        # Ordem de implementação das features, da fundação à operação
 ├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho

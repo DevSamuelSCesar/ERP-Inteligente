@@ -295,41 +295,59 @@ classDiagram
 classDiagram
     class ILlmProvider {
         <<interface>>
-        +ChatAsync(request) Task~LlmResponse~
-        +CountTokensAsync(request) Task~int~
+        +CompleteAsync(LlmRequest request) Task~LlmResponse~
     }
-    class AnthropicProvider
-    class OpenAiCompatibleProvider {
-        +Uri BaseUrl
+    class DeepSeekProvider {
+        -string Endpoint
+        +TestConnectionAsync() Task
     }
-    ILlmProvider <|.. AnthropicProvider
-    ILlmProvider <|.. OpenAiCompatibleProvider : OpenAI e DeepSeek
+    class LlmSettings {
+        +bool IsConfigured
+        +string Model
+        +SetKey(string key)
+        +ClearKey()
+    }
+    ILlmProvider <|.. DeepSeekProvider : feature 3
+    DeepSeekProvider --> LlmSettings : chave no cofre do SO
 
     class Planner {
-        +PlanAsync(UserRequest request) Task~PlanResult~
+        +RunAsync(UserSession user, PlannerTurn[] history, string request) Task~PlannerResult~
     }
+    class PlannerResult {
+        <<abstract>>
+    }
+    class PlannerAnswer
+    class PlannerProposal {
+        +PlanDraft Draft
+        +EnginePreview Preview
+    }
+    class PlannerEscalated
+    class PlannerFailed
+    PlannerResult <|-- PlannerAnswer
+    PlannerResult <|-- PlannerProposal
+    PlannerResult <|-- PlannerEscalated
+    PlannerResult <|-- PlannerFailed
+    class PlannerTools {
+        +search_products()
+        +get_product()
+        +get_stock()
+        +find_location()
+        +list_inbound_orders()
+        +list_outbound_orders()
+    }
+    class AiReadConnection {
+        +Authorize(action, table, column, view) AuthorizerResult
+    }
+    class PlanEngine {
+        +Preview(user, planJson, plannedBy) EnginePreview
+    }
+
     class RecipeMatcher {
         +MatchAsync(UserRequest request) Task~Plan?~
     }
     class SkillRegistry {
         +Index() SkillSummary[]
         +Load(string name) Skill
-    }
-    class Skill {
-        +string Name
-        +string Version
-        +string Instructions
-        +string[] AllowedTools
-        +string[] AllowedOperations
-    }
-    class IReadTool {
-        <<interface>>
-        +string Name
-        +JsonSchema InputSchema
-        +ExecuteAsync(JsonElement args) Task~JsonElement~
-    }
-    class AiReadConnection {
-        +Authorize(action, table, column, view) AuthorizerResult
     }
     class KnowledgeRetriever {
         +SearchAsync(string query, int k) Task~Chunk[]~
@@ -338,19 +356,16 @@ classDiagram
         +SearchAsync(string query, Scope scope) Task~Memory[]~
         +RememberAsync(Memory candidate) Task
     }
-    class MemoryFilter {
-        +IsAcceptable(Memory candidate) bool
-    }
 
     Planner --> ILlmProvider
-    Planner --> SkillRegistry
-    Planner --> IReadTool
-    Planner --> KnowledgeRetriever
-    Planner --> MemoryStore
-    RecipeMatcher --> ILlmProvider
-    SkillRegistry --> Skill
-    IReadTool --> AiReadConnection
-    MemoryStore --> MemoryFilter
+    Planner --> PlannerTools : leitura
+    Planner --> PlanEngine : submit_plan (só simula)
+    Planner ..> PlannerResult
+    PlannerTools --> AiReadConnection
+    Planner ..> SkillRegistry : feature 4
+    Planner ..> KnowledgeRetriever : feature 5
+    Planner ..> MemoryStore : feature 5
+    RecipeMatcher ..> ILlmProvider : feature 7
 ```
 
 ### Classes do motor de planos e segurança
@@ -597,7 +612,11 @@ dotnet test tests/Nexus.Tests                # testes do app
 
 No primeiro uso o app cria o banco criptografado a partir dos scripts de `db/` e guarda as chaves no cofre do sistema. Para entrar, use um dos usuários fictícios (`op.joao`, `sup.maria`, `adm.carlos`, `aud.lucia`) com a **senha de demonstração `demo`**. Essa senha existe só para os dados fictícios do repositório e nunca deve ser usada com dados reais.
 
-Para alterar dados, use a tela **Novo plano**: monte os passos, pré-visualize e envie. Planos de ajuste ficam em **Planos** esperando a aprovação de outro supervisor. O Nexus continua só consultando até o Planner com LLM (feature 3). Arquivos `.db` são ignorados pelo git.
+Para o **Nexus** conversar, o administrador (`adm.carlos`) cola a chave de API da DeepSeek em **Configurações → Provedor de LLM**. A chave vai para o cofre do sistema, nunca para o banco nem para o repositório. Depois disso, peça em linguagem natural (ex.: "guarde as 40 caixas do ABC-123 da doca em A-02-01"):
+- o Nexus consulta o estoque pelas views `v_ai_*` e devolve uma **proposta** com o efeito simulado;
+- nada é gravado até quem pediu clicar em **Confirmar**.
+
+Ajustes de estoque e cadastro de endereços ficam fora do alcance da IA e são feitos na tela **Novo plano**. Planos de ajuste ficam em **Planos** esperando a aprovação de outro supervisor. Arquivos `.db` são ignorados pelo git.
 
 ## Documentação
 

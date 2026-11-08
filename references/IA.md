@@ -12,6 +12,11 @@
 
 DeepSeek e OpenAI continuam suportados pela interface `ILlmProvider` e podem ser escolhidos na configuração.
 
+**Estado da implementação (feature 3):** o primeiro adaptador implementado é o da **DeepSeek**.
+- **Modelos:** `deepseek-v4-pro` no Planner por padrão, ou `deepseek-flash`, escolhidos em Configurações. Claude e OpenAI entram na feature 8.
+- **Chave:** digitada pelo administrador e guardada no cofre do SO.
+- **Limites por pedido:** 3 planos inválidos, 8 rodadas, 8.192 tokens por chamada e 60.000 por pedido. Passou do limite, a tarefa é escalada ao operador. É a defesa contra "custo descontrolado" da seção 5.
+
 **Privacidade:** o que sai da máquina é sempre não sensível (views `v_ai_*`, procedimentos fictícios e memórias filtradas). Por isso a escolha do provedor afeta custo e qualidade, mas não expõe CPF, contatos ou custos. Quem quiser zero envio de dados pode usar o modelo do fine-tuning e embeddings locais para receitas e RAG; o Planner ainda depende de um provedor.
 
 ## 2. Custo por 1.000 usos

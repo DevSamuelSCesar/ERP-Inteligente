@@ -31,6 +31,24 @@ public sealed class StockViewModel(IQueryService queries, TimeProvider time) : Q
     }
 }
 
+public sealed class ProductsViewModel(IQueryService queries) : QueryPageViewModel<ProductRow>
+{
+    public override string Title => "Produtos";
+    public override string FilterPlaceholder => "Filtrar por SKU, nome ou descrição";
+
+    protected override Task<IReadOnlyList<ProductRow>> LoadAsync() => queries.GetProductsAsync();
+
+    protected override IEnumerable<string> SearchableText(ProductRow row) => [row.Sku, row.Name, row.Description];
+
+    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<ProductRow> rows)
+    {
+        yield return new("Produtos", rows.Count.ToString());
+        yield return new("Com saldo", rows.Count(r => r.Balance > 0).ToString());
+        yield return new("Sem saldo", rows.Count(r => r.Balance == 0).ToString());
+        yield return new("Controlam validade", rows.Count(r => r.TracksExpiry).ToString());
+    }
+}
+
 public sealed class LocationsViewModel(IQueryService queries) : QueryPageViewModel<LocationRow>
 {
     public override string Title => "Endereços";

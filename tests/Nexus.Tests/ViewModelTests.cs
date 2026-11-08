@@ -20,7 +20,7 @@ public class ViewModelTests
         var shell = Shell(new DemoWorld(), DemoSessionService.Operator);
 
         var labels = shell.MenuItems.Select(i => i.Label).ToList();
-        Assert.Equal(["Nexus", "Novo plano", "Estoque", "Endereços", "Pedidos", "Planos", "Receitas"], labels);
+        Assert.Equal(["Nexus", "Novo plano", "Estoque", "Produtos", "Endereços", "Pedidos", "Planos", "Receitas"], labels);
     }
 
     [Fact]
@@ -66,6 +66,16 @@ public class ViewModelTests
 
         Assert.Equal("", vm.Draft);
         Assert.False(vm.IsBusy);
+        var proposal = Assert.IsType<DraftPlanViewModel>(vm.Entries.Last().Body);
+        Assert.Same(proposal, vm.PendingProposal);
+        Assert.False(vm.IsInputEnabled);
+        Assert.Equal(2, w.Data.Plans.Count);
+
+        await proposal.ConfirmCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.PendingProposal);
+        Assert.True(vm.IsInputEnabled);
+        Assert.Equal(DraftState.Confirmed, proposal.State);
         var board = Assert.IsType<PlanBoardViewModel>(vm.Entries.Last().Body);
         Assert.True(board.IsExecuted);
         Assert.Equal(2, board.Summary!.Flows.Count);
@@ -80,12 +90,86 @@ public class ViewModelTests
         vm.Draft = "ajuste -1 cx do ALI-300 em C-01-01 por avaria";
 
         await vm.SendCommand.ExecuteAsync(null);
+        var proposal = Assert.IsType<DraftPlanViewModel>(vm.Entries.Last().Body);
+        Assert.True(proposal.IsCritical);
+        Assert.Contains("supervisor", proposal.StatusText);
+        await proposal.ConfirmCommand.ExecuteAsync(null);
 
         var board = Assert.IsType<PlanBoardViewModel>(vm.Entries.Last().Body);
         Assert.False(board.CanDecide);
         Assert.True(board.IsAwaitingApprover);
         Assert.False(board.AcceptCommand.CanExecute(null));
         Assert.Contains("Quem pediu não pode aprovar", board.StatusText);
+    }
+
+    [Fact]
+    public async Task Discarding_a_proposal_writes_nothing_and_unlocks_the_input()
+    {
+        var w = new DemoWorld();
+        var vm = Nexus(w, DemoSessionService.Supervisor);
+        var before = w.Data.Plans.Count;
+        vm.Draft = "Guarde as 40 caixas do ABC-123 que estão na doca";
+        await vm.SendCommand.ExecuteAsync(null);
+        var proposal = Assert.IsType<DraftPlanViewModel>(vm.Entries.Last().Body);
+
+        vm.Draft = "outro pedido";
+        Assert.False(vm.SendCommand.CanExecute(null));
+        proposal.DiscardCommand.Execute(null);
+
+        Assert.Equal(DraftState.Discarded, proposal.State);
+        Assert.False(proposal.ConfirmCommand.CanExecute(null));
+        Assert.Contains("Nada foi gravado", proposal.StatusText);
+        Assert.Equal(before, w.Data.Plans.Count);
+        Assert.True(vm.SendCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Cancelling_a_running_request_reports_it_and_frees_the_input()
+    {
+        var gate = new TaskCompletionSource();
+        var vm = new NexusViewModel(DemoSessionService.Supervisor, new GatedNexus(gate.Task), new DemoWorld().Plans,
+            new FakeDialogService(), TimeProvider.System);
+        vm.Draft = "saldo do ABC-123";
+
+        var sending = vm.SendCommand.ExecuteAsync(null);
+        Assert.True(vm.IsBusy);
+        Assert.True(vm.CancelCommand.CanExecute(null));
+        vm.CancelCommand.Execute(null);
+        await sending;
+
+        Assert.False(vm.IsBusy);
+        Assert.Equal("Pedido cancelado. Nada foi gravado.", Assert.IsType<TextBodyViewModel>(vm.Entries.Last().Body).Text);
+    }
+
+    [Fact]
+    public async Task Escalated_reply_is_a_warning_line()
+    {
+        var vm = new NexusViewModel(DemoSessionService.Supervisor,
+            new FixedNexus(new erp_inteligente.Services.NexusReply("Não consegui montar um plano válido.", IsEscalated: true)),
+            new DemoWorld().Plans, new FakeDialogService(), TimeProvider.System);
+        vm.Draft = "pedido difícil";
+
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var body = Assert.IsType<TextBodyViewModel>(vm.Entries.Last().Body);
+        Assert.True(body.IsWarning);
+        Assert.False(body.IsError);
+    }
+
+    private sealed class GatedNexus(Task gate) : erp_inteligente.Services.INexusService
+    {
+        public async Task<erp_inteligente.Services.NexusReply> SendAsync(string request, UserSession user, IProgress<string> status,
+            CancellationToken cancellationToken = default)
+        {
+            await gate.WaitAsync(cancellationToken);
+            return new("ok");
+        }
+    }
+
+    private sealed class FixedNexus(erp_inteligente.Services.NexusReply reply) : erp_inteligente.Services.INexusService
+    {
+        public Task<erp_inteligente.Services.NexusReply> SendAsync(string request, UserSession user, IProgress<string> status,
+            CancellationToken cancellationToken = default) => Task.FromResult(reply);
     }
 
     [Fact]

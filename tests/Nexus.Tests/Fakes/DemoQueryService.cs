@@ -22,6 +22,16 @@ public sealed class DemoQueryService(DemoData data) : IQueryService
         return Task.FromResult(rows);
     }
 
+    public Task<IReadOnlyList<ProductRow>> GetProductsAsync()
+    {
+        IReadOnlyList<ProductRow> rows = data.Products
+            .OrderBy(p => p.Sku)
+            .Select(p => new ProductRow(p.Sku, p.Name, p.Unit, null, false, "",
+                data.Balances.Where(b => b.Sku == p.Sku).Sum(b => b.Quantity)))
+            .ToList();
+        return Task.FromResult(rows);
+    }
+
     public Task<IReadOnlyList<LocationRow>> GetLocationsAsync()
     {
         IReadOnlyList<LocationRow> rows = data.Locations

@@ -145,6 +145,52 @@ public sealed class PlanEngineTests : IDisposable
         AssertChainValid();
     }
 
+    [Theory]
+    [InlineData("{\"op\":\"adjust_stock\",\"args\":{\"sku\":\"ABC-123\",\"qty\":-1,\"location\":\"DOCA-01\",\"reason\":\"avaria\"}}")]
+    [InlineData("{\"op\":\"create_location\",\"args\":{\"code\":\"A-09-01\",\"zone\":\"A\",\"capacity\":100}}")]
+    public void Ai_plan_gets_only_the_rights_shared_by_the_ai_role_and_the_requester(string step)
+    {
+        // sup.maria holds stock.adjust and location.manage; the AI role does not, so a plan of the AI may not use them.
+        var preview = _engine.Preview(_maria, Json(step), "ai");
+        Assert.Contains(preview.Errors, e => e.Code == "policy.denied");
+
+        var result = _engine.Submit(_maria, Json(step), "ai");
+        Assert.Equal("failed", result.Status);
+        Assert.Contains(result.Errors, e => e.Code == "policy.denied");
+        Assert.Equal(40, Qty("ABC-123", "DOCA-01"));
+        Assert.Equal(0, _f.Scalar("SELECT COUNT(*) FROM locations WHERE code = 'A-09-01'"));
+        AssertChainValid();
+    }
+
+    [Fact]
+    public void The_same_steps_by_the_user_keep_the_users_rights()
+    {
+        var preview = _engine.Preview(_maria,
+            Json("{\"op\":\"create_location\",\"args\":{\"code\":\"A-09-01\",\"zone\":\"A\",\"capacity\":100}}"));
+        Assert.True(preview.IsValid);
+    }
+
+    [Fact]
+    public void Approval_of_an_ai_plan_reads_the_ai_intersection_again()
+    {
+        // A pending plan marked as planned by the AI fails at approval: the AI role lacks stock.adjust.
+        var pending = _engine.Submit(_maria, Json(Adjust("ABC-123", -5, "DOCA-01")), "user");
+        var id = pending.PlanId!.Value;
+        _f.Exec("UPDATE plans SET planned_by = 'ai' WHERE id = $id", ("$id", id));
+
+        _engine.Approve(AddSupervisor("sup.outro", _maria.WarehouseId), id);
+
+        Assert.Equal("failed", Status(id));
+        Assert.Equal(40, Qty("ABC-123", "DOCA-01"));
+        AssertChainValid();
+    }
+
+    [Fact]
+    public void Unknown_origin_is_refused()
+    {
+        Assert.Throws<ArgumentException>(() => _engine.Preview(_maria, Json(Move("ABC-123", 1, "DOCA-01", "A-02-01")), "llm"));
+    }
+
     [Fact]
     public void Critical_adjust_by_a_supervisor_waits_for_approval_without_touching_stock()
     {

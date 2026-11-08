@@ -20,7 +20,8 @@ public sealed partial class ShellViewModel : ViewModelBase
     /// <param name="auditStatus">Result of the hash-chain verification; a break is shown to users with <c>audit.read</c>.</param>
     /// <param name="databaseDescription">Where the encrypted database lives, shown in Configurações.</param>
     public ShellViewModel(ISessionService session, IQueryService queries, IPlanService plans, INexusService nexus,
-        IDialogService dialogs, TimeProvider time, AuditVerification auditStatus, string databaseDescription)
+        IDialogService dialogs, TimeProvider time, AuditVerification auditStatus, string databaseDescription,
+        LlmSettingsService? llm = null)
     {
         _user = session.Current;
         _plans = plans;
@@ -33,6 +34,7 @@ public sealed partial class ShellViewModel : ViewModelBase
             new("Nexus", "Nexus", () => new NexusViewModel(_user, nexus, plans, dialogs, time), Permissions.PlanSubmit),
             new("Novo plano", "NewPlan", () => new NewPlanViewModel(_user, plans, dialogs), Permissions.PlanSubmit),
             new("Estoque", "Stock", () => new StockViewModel(queries, time), Permissions.StockRead),
+            new("Produtos", "Products", () => new ProductsViewModel(queries), Permissions.StockRead),
             new("Endereços", "Locations", () => new LocationsViewModel(queries), Permissions.StockRead),
             new("Pedidos", "Orders", () => new OrdersViewModel(queries), Permissions.StockRead),
             new("Planos", "Plans", () => new PlansViewModel(_user, plans, dialogs), Permissions.PlanSubmit, Permissions.PlanApprove, Permissions.AuditRead),
@@ -41,7 +43,7 @@ public sealed partial class ShellViewModel : ViewModelBase
         ];
         MenuItems = new ObservableCollection<NavigationItem>(menu.Where(IsAllowed));
         FooterItems = new ObservableCollection<NavigationItem>(
-            new NavigationItem[] { new("Configurações", "Settings", () => new SettingsViewModel(_user, databaseDescription)) }.Where(IsAllowed));
+            new NavigationItem[] { new("Configurações", "Settings", () => new SettingsViewModel(_user, databaseDescription, llm)) }.Where(IsAllowed));
 
         _plansItem = MenuItems.FirstOrDefault(i => i.IconKey == "Plans");
         _plans.PlanChanged += (_, _) => UpdatePendingBadge();

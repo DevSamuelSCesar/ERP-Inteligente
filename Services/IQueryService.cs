@@ -8,6 +8,8 @@ namespace erp_inteligente.Services;
 public interface IQueryService
 {
     Task<IReadOnlyList<StockRow>> GetStockAsync();
+    /// <summary>All catalog products, with the balance in the session's warehouse (zero when there is none).</summary>
+    Task<IReadOnlyList<ProductRow>> GetProductsAsync();
     Task<IReadOnlyList<LocationRow>> GetLocationsAsync();
     Task<IReadOnlyList<OrderRow>> GetOrdersAsync();
     Task<IReadOnlyList<RecipeRow>> GetRecipesAsync();

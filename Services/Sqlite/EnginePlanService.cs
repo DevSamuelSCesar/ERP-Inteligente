@@ -84,7 +84,7 @@ public sealed class EnginePlanService(PlanEngine engine, ApplicationDb db, ISess
     {
         ArgumentNullException.ThrowIfNull(draft);
         var user = session.Current;
-        var preview = await Task.Run(() => engine.Preview(user, draft.Json));
+        var preview = await Task.Run(() => engine.Preview(user, draft.Json, PlannedBy(draft)));
 
         var issues = preview.Errors.Select(e => new PlanIssue(e.StepIndex is { } i ? i + 1 : null, e.Message)).ToList();
         var steps = new List<PlanStep>();
@@ -105,7 +105,7 @@ public sealed class EnginePlanService(PlanEngine engine, ApplicationDb db, ISess
     {
         ArgumentNullException.ThrowIfNull(draft);
         var user = session.Current;
-        var submission = await Task.Run(() => engine.Submit(user, draft.Json, "user"));
+        var submission = await Task.Run(() => engine.Submit(user, draft.Json, PlannedBy(draft)));
         if (submission.PlanId is not { } id)
             throw new ArgumentException(Messages(submission.Errors), nameof(draft));
 
@@ -136,6 +136,8 @@ public sealed class EnginePlanService(PlanEngine engine, ApplicationDb db, ISess
     }
 
     private Plan Tracked(Plan plan) => _known.TryGetValue(plan.Id, out var known) ? known : plan;
+
+    private static string PlannedBy(PlanDraft draft) => draft.Origin == PlanOrigin.Ai ? "ai" : "user";
 
     private static string Messages(IReadOnlyList<PlanError> errors) =>
         errors.Count == 0 ? "O plano não é válido." : string.Join(" ", errors.Select(e => e.Message));

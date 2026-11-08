@@ -7,6 +7,8 @@
         <!-- Errors are a line with icon and text; no tinted box (references/UI.md, section 9.2) -->
         <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Margin="0,2,8,0" VerticalAlignment="Top"
                   IsVisible="{Binding IsError}" />
+        <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Margin="0,2,8,0" VerticalAlignment="Top"
+                  IsVisible="{Binding IsWarning}" />
         <SelectableTextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
     </Grid>
 </UserControl>

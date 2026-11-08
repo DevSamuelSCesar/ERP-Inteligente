@@ -59,18 +59,20 @@ public sealed class PlanEngine
     }
 
     /// <summary>Validates and simulates a plan for <paramref name="requester"/>. Writes nothing.</summary>
-    /// <exception cref="PolicyDeniedException">The requester lacks <c>plan.submit</c>.</exception>
-    public EnginePreview Preview(UserSession requester, string planJson)
+    /// <param name="plannedBy"><c>user</c>, <c>ai</c> or <c>recipe</c>; a plan of the AI only gets the AI ∩ requester rights.</param>
+    /// <exception cref="PolicyDeniedException">The requester (or the AI acting for them) lacks <c>plan.submit</c>.</exception>
+    public EnginePreview Preview(UserSession requester, string planJson, string plannedBy = "user")
     {
         ArgumentNullException.ThrowIfNull(requester);
         ArgumentNullException.ThrowIfNull(planJson);
-        _policy.Require(requester, Permissions.PlanSubmit);
+        RequireOrigin(plannedBy);
+        RequireSubmit(requester, plannedBy);
 
         var parsed = DslParser.Parse(planJson);
         if (parsed.Document is null)
             return new EnginePreview(null, parsed.Errors, RiskLevel.Reversible, null);
 
-        var result = _simulator.Simulate(requester, parsed.Document, AllowedFor(requester));
+        var result = _simulator.Simulate(requester, parsed.Document, AllowedFor(requester, plannedBy));
         return new EnginePreview(parsed.Document, result.Errors, Reportable(result.Risk), result.Succeeded ? result.Diff : null);
     }
 
@@ -78,15 +80,14 @@ public sealed class PlanEngine
     /// Stores the plan and processes it: invalid plans become <c>failed</c>, critical ones <c>pending_approval</c> and
     /// reversible ones execute at once. Text that is not JSON (or is too large) is not stored.
     /// </summary>
-    /// <param name="plannedBy"><c>user</c>, <c>ai</c> or <c>recipe</c>.</param>
-    /// <exception cref="PolicyDeniedException">The requester lacks <c>plan.submit</c>.</exception>
+    /// <param name="plannedBy"><c>user</c>, <c>ai</c> or <c>recipe</c>; a plan of the AI only gets the AI ∩ requester rights.</param>
+    /// <exception cref="PolicyDeniedException">The requester (or the AI acting for them) lacks <c>plan.submit</c>.</exception>
     public EngineSubmission Submit(UserSession requester, string planJson, string plannedBy)
     {
         ArgumentNullException.ThrowIfNull(requester);
         ArgumentNullException.ThrowIfNull(planJson);
-        if (plannedBy is not ("user" or "ai" or "recipe"))
-            throw new ArgumentException("plannedBy must be user, ai or recipe.", nameof(plannedBy));
-        _policy.Require(requester, Permissions.PlanSubmit);
+        RequireOrigin(plannedBy);
+        RequireSubmit(requester, plannedBy);
 
         var parsed = DslParser.Parse(planJson);
         if (!IsStorable(planJson))
@@ -99,7 +100,7 @@ public sealed class PlanEngine
         if (document is null)
             return Fail(planId, requester, parsed.Errors, null);
 
-        var allowed = AllowedFor(requester);
+        var allowed = AllowedFor(requester, plannedBy);
         if (risk == RiskLevel.Critical)
         {
             var simulation = _simulator.Simulate(requester, document, allowed);
@@ -152,7 +153,7 @@ public sealed class PlanEngine
         }
 
         var document = parsed.Document;
-        _executor.Execute(requester, document, planId, AllowedFor(requester),
+        _executor.Execute(requester, document, planId, AllowedFor(requester, row.PlannedBy),
             (c, t, r) => MarkExecuted(c, t, planId, requester, approver, "pending_approval", document, r),
             (c, t, r) => MarkFailed(c, t, planId, requester, r.Errors, approver.UserId));
     }
@@ -304,20 +305,20 @@ public sealed class PlanEngine
 
     // ---- reads -----------------------------------------------------------------------------------------------
 
-    private sealed record PlanRow(long Id, long RequestedBy, string PlanJson, string DslVersion, string Status);
+    private sealed record PlanRow(long Id, long RequestedBy, string PlannedBy, string PlanJson, string DslVersion, string Status);
 
     private PlanRow? LoadPlan(long warehouseId, long planId)
     {
         using var connection = _database.OpenApplication();
         using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT p.id, p.requested_by, p.plan_json, p.dsl_version, p.status FROM plans p " +
+            "SELECT p.id, p.requested_by, p.planned_by, p.plan_json, p.dsl_version, p.status FROM plans p " +
             "JOIN users u ON u.id = p.requested_by WHERE p.id = $id AND u.warehouse_id = $warehouse_id";
         command.Parameters.AddWithValue("$id", planId);
         command.Parameters.AddWithValue("$warehouse_id", warehouseId);
         using var reader = command.ExecuteReader();
         return reader.Read()
-            ? new PlanRow(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4))
+            ? new PlanRow(reader.GetInt64(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5))
             : null;
     }
 
@@ -361,10 +362,32 @@ public sealed class PlanEngine
     /// The requester's effective permissions, read once just before a run: the check inside a transaction must not
     /// open more connections, and a change in the same instant would not be visible to a running plan anyway.
     /// </summary>
-    private Func<string, bool> AllowedFor(UserSession session)
+    /// <summary>
+    /// Live rights a plan runs with: the requester's own, or for a plan of the AI the AI role ∩ requester
+    /// (references/ARQUITETURA.md, section 12.5). Read again at approval, so a revoked right stops a pending plan.
+    /// </summary>
+    private Func<string, bool> AllowedFor(UserSession session, string plannedBy)
     {
-        var permissions = _policy.PermissionsForRole(session.RoleId);
+        var permissions = plannedBy == "ai" ? _policy.EffectiveForAi(session) : _policy.PermissionsForRole(session.RoleId);
         return permissions.Contains;
+    }
+
+    private static void RequireOrigin(string plannedBy)
+    {
+        if (plannedBy is not ("user" or "ai" or "recipe"))
+            throw new ArgumentException("plannedBy must be user, ai or recipe.", nameof(plannedBy));
+    }
+
+    /// <summary><c>plan.submit</c> for the requester and, for a plan of the AI, also for the AI role.</summary>
+    private void RequireSubmit(UserSession requester, string plannedBy)
+    {
+        _policy.Require(requester, Permissions.PlanSubmit);
+        if (plannedBy != "ai" || _policy.EffectiveForAi(requester).Contains(Permissions.PlanSubmit))
+            return;
+
+        _audit.Append(new AuditEntry(AuditActorType.Ai, null, requester.UserId, "policy.denied",
+            "permission:" + Permissions.PlanSubmit, AuditOutcome.Denied));
+        throw new PolicyDeniedException(Permissions.PlanSubmit);
     }
 
     private static RiskLevel RiskOf(PlanDocument document) =>
