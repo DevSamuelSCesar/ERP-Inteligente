@@ -94,6 +94,7 @@ LLM → submit_plan({ ...plano... })
 
 ```json
 {
+  "dsl_version": "1.0",
   "intent": "putaway",
   "skill": "armazenagem",
   "steps": [
@@ -110,17 +111,33 @@ Regras da DSL:
 - Não há laços nem condicionais arbitrárias. O que exigir lógica complexa vira uma nova operação no catálogo, implementada em C# e testada.
 - A DSL é **versionada**. Planos e receitas guardam a versão com que foram criados.
 
+**DSL v1 (implementada em `Core/Engine`):**
+- **Estrutura:** só os campos `dsl_version` (`"1.0"`), `intent` e `skill` (`^[a-z_]{1,40}$`) e `steps`, com 1 a 50 passos. Cada passo tem só `op`, `args` e o `as` opcional (`^[a-z][a-z0-9_]{0,31}$`, único no plano).
+- **Proteção contra entrada maliciosa:**
+  - o documento tem no máximo 64 KB e profundidade 16;
+  - chaves JSON duplicadas, comentários e vírgulas sobrando são recusados.
+- **Referências:** uma referência `"$nome"` só pode apontar para um passo anterior.
+- **Argumentos:** cada operação valida os seus por um JSON Schema (`Core/Engine/Schemas/v1/*.schema.json`, draft 2020-12, `additionalProperties: false`). Esses mesmos schemas descrevem as ferramentas do LLM na feature 3.
+- **Formatos:**
+  - SKU: `^[A-Z]{3}-[0-9]{3}$`;
+  - endereço: `^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$`;
+  - usa-se `[0-9]` e não `\d`, porque no .NET `\d` aceita dígitos de outros alfabetos.
+- **Erros:** são estruturados (`passo`, `campo`, `código`, mensagem em português de negócio). Na pré-visualização eles vão para o operador; na feature 3 voltam para o LLM corrigir.
+- **Simulação:** o Simulator executa o plano pelo mesmo código do Executor, dentro de uma transação que sempre termina em `ROLLBACK`. O efeito mostrado na pré-visualização é exatamente o que a execução faria.
+- **Execução:** o Executor revalida tudo dentro de `BEGIN IMMEDIATE`, porque o estoque pode ter mudado desde a simulação. Os movimentos, o status do plano e a auditoria são gravados na mesma transação, tudo ou nada.
+
 ### Catálogo inicial de operações (armazém)
 
-| Operação | Descrição | Risco |
-|----------|-----------|-------|
-| `receive_goods` | Registra a entrada de itens na doca | Reversível |
-| `move_stock` | Transfere saldo entre endereços | Reversível |
-| `reserve_stock` | Reserva saldo para um pedido de saída | Reversível |
-| `pick_items` | Registra a separação de itens | Reversível |
-| `ship_order` | Expede e baixa o estoque | Crítico |
-| `adjust_stock` | Ajusta saldo por inventário ou avaria (exige motivo) | Crítico |
-| `create_location` / `create_product` | Cadastros | Reversível |
+| Operação | Descrição | Risco | Permissão | Estado |
+|----------|-----------|-------|-----------|--------|
+| `receive_goods` | Registra a entrada de itens na doca (zona `DOCA`); lote e validade obrigatórios para produto com validade; pode dar baixa num pedido de entrada | Reversível | `stock.receive` | Implementada |
+| `move_stock` | Transfere saldo disponível (quantidade − reservado) entre endereços do armazém, respeitando a capacidade | Reversível | `stock.move` | Implementada |
+| `reserve_stock` | Reserva saldo para um pedido de saída | Reversível | `stock.reserve` | Feature 4 |
+| `pick_items` | Registra a separação de itens | Reversível | `stock.pick` | Feature 4 |
+| `ship_order` | Expede e baixa o estoque | Crítico | `stock.ship` | Feature 4 |
+| `adjust_stock` | Ajusta saldo por inventário ou avaria (exige motivo); nunca abaixo do reservado | Crítico | `stock.adjust` | Implementada (antecipada da feature 4) |
+| `create_product` | Cadastra produto; o custo unitário vai cifrado em `unit_cost_enc` | Reversível | `catalog.manage` | Implementada |
+| `create_location` | Cadastra endereço numa zona do armazém | Reversível | `location.manage` | Implementada |
 
 O risco do plano é o **maior risco** entre seus passos.
 
@@ -243,7 +260,7 @@ Experimento para reduzir custo e dependência de rede na etapa mais frequente: t
 |-------|----------|
 | Domínio | Produtos, endereços, saldos, lotes, fornecedores, clientes, pedidos de entrada e saída |
 | Livro-razão | `stock_movements`: uma linha por mudança de estoque, nunca alterada nem apagada |
-| Planos | Plano JSON, status (`validating`, `pending_approval`, `rejected`, `executed`, `failed`), diff simulado, tentativas, aprovador |
+| Planos | Plano JSON, status (`validating`, `pending_approval`, `rejected`, `executed`, `failed`), diff simulado, tentativas, aprovador, quem rejeitou e o motivo (`rejected_by`, `rejection_reason`), causa da falha (`failure_reason`) |
 | Receitas | Plano parametrizado, parâmetros, versões da DSL e da skill, estatísticas de uso e falha |
 | Memórias | Tabela `memories` + índice FTS5 |
 | Conhecimento (RAG) | `knowledge_chunks` + índice FTS5 + vetores `sqlite-vec` |
@@ -336,7 +353,7 @@ No policy engine (`Core/Policy`):
   - UPDATE e DELETE em `audit_log` e `stock_movements`;
   - alteração de planos finalizados e exclusão de qualquer plano;
   - concessão de permissões proibidas ao papel da IA e remoção dos seus `DENY`;
-  - aprovação de plano pela IA ou pelo próprio solicitante.
+  - aprovação ou rejeição de plano pela IA ou pelo próprio solicitante, e plano ao mesmo tempo aprovado e rejeitado.
 - **Auditoria encadeada:** cada linha de `audit_log` guarda o hash SHA-256 da linha anterior. Um job verifica a cadeia ao iniciar o app e periodicamente; qualquer quebra gera alerta ao administrador.
   - **Regra v1 do hash:** `hash` = SHA-256 em hexadecimal minúsculo dos bytes UTF-8 de
     `"nexus-audit-v1\n" + prev_hash + "\n" + F(id) F(occurred_at) F(actor_type) F(actor_id) F(on_behalf_of) F(action) F(target) F(outcome) F(details_json)`,

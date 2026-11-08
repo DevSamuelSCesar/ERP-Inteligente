@@ -95,8 +95,8 @@ public sealed partial class DemoNexusService(DemoData data, TimeSpan stepDelay) 
         status.Report("Validando plano");
         await Task.Delay(stepDelay, cancellationToken);
 
-        var plan = new Plan(data.NextPlanId(), "armazenagem", user.Username, user.DisplayName, data.Time.GetUtcNow(), steps);
-        return new NexusReply($"Plano para guardar {quantity} {product.Unit} de {sku} de {from}.", plan);
+        return new NexusReply($"Plano para guardar {quantity} {product.Unit} de {sku} de {from}.",
+            DemoPlanService.ToDraft("putaway", "armazenagem", steps));
     }
 
     private async Task<NexusReply> PlanAdjustAsync(string request, string upper, string words, string? sku, List<string> locations,
@@ -123,8 +123,8 @@ public sealed partial class DemoNexusService(DemoData data, TimeSpan stepDelay) 
         await Task.Delay(stepDelay, cancellationToken);
 
         var step = new PlanStep(PlanOperation.AdjustStock, quantity, product.Unit, sku, locations[0], null, Capitalize(reason[..Math.Min(reason.Length, ApprovalPolicy.MaxReasonLength)]));
-        var plan = new Plan(data.NextPlanId(), "inventario", user.Username, user.DisplayName, data.Time.GetUtcNow(), [step]);
-        return new NexusReply($"Plano de ajuste de {sku} em {locations[0]}. Ajuste é operação crítica e precisa de aprovação.", plan);
+        return new NexusReply($"Plano de ajuste de {sku} em {locations[0]}. Ajuste é operação crítica e precisa de aprovação.",
+            DemoPlanService.ToDraft("adjust", "inventario", [step]));
     }
 
     /// <summary>Fills zone A locations in order, skipping locations that hold another SKU.</summary>

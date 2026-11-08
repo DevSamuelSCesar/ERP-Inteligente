@@ -184,8 +184,12 @@ CREATE TABLE plans (
     simulated_diff_json TEXT CHECK (simulated_diff_json IS NULL OR json_valid(simulated_diff_json)),
     attempts            INTEGER NOT NULL DEFAULT 1,
     approved_by         INTEGER REFERENCES users (id),
+    rejected_by         INTEGER REFERENCES users (id),  -- supervisor who rejected the plan
+    rejection_reason    TEXT CHECK (rejection_reason IS NULL OR length(rejection_reason) BETWEEN 1 AND 200),
+    failure_reason      TEXT,  -- business-language reason when validation or execution failed
     created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    executed_at         TEXT
+    executed_at         TEXT,
+    CHECK (status <> 'rejected' OR (rejected_by IS NOT NULL AND rejection_reason IS NOT NULL))
 ) STRICT;
 
 -- Append-only ledger: every stock change is one row; balances are kept in sync by the Executor.

@@ -51,8 +51,12 @@ public class HeadlessUiTests
         window.Close();
     }
 
+    /// <summary>
+    /// Seed plan 2 (an adjustment requested on behalf of op.joao) can be decided by sup.maria, but the
+    /// requester's rights decide what runs: op.joao has no stock.adjust, so approving ends in a failed plan.
+    /// </summary>
     [AvaloniaFact]
-    public async Task Pending_plan_is_shown_read_only_until_the_engine_exists()
+    public async Task Approving_seed_plan_runs_with_the_requester_rights()
     {
         using var app = new TestApp();
         var shell = await app.ShellForAsync("sup.maria");
@@ -65,10 +69,50 @@ public class HeadlessUiTests
         var board = Assert.Single(window.GetVisualDescendants().OfType<PlanBoardView>());
         var viewModel = Assert.IsType<PlanBoardViewModel>(board.DataContext);
         Assert.Equal(2, viewModel.PlanId);
-        Assert.False(viewModel.CanDecide);
-        Assert.Contains("motor de planos", viewModel.StatusText);
-        Assert.Equal(1, shell.MenuItems.Single(i => i.Label == "Planos").Badge);
+        Assert.True(viewModel.CanDecide);
+
+        await viewModel.AcceptCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(viewModel.IsFailed);
+        Assert.Contains("não permite", viewModel.StatusText);
+        Assert.Equal(0, shell.MenuItems.Single(i => i.Label == "Planos").Badge);
         window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task New_plan_screen_previews_and_submits_a_move()
+    {
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("sup.maria");
+        var window = new MainWindow { DataContext = shell };
+        window.Show();
+        await shell.NavigateCommand.ExecuteAsync(shell.MenuItems.Single(i => i.Label == "Novo plano"));
+        var page = Assert.IsType<NewPlanViewModel>(shell.CurrentPage);
+
+        page.SelectedOperation = page.Operations.Single(o => o.Op == "move_stock");
+        Fill(page, ("sku", "abc-123"), ("qty", "40"), ("from", "DOCA-01"), ("to", "A-02-01"));
+        page.AddStepCommand.Execute(null);
+        Assert.False(page.SubmitCommand.CanExecute(null)); // only a previewed plan can be sent
+
+        await page.PreviewCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(page.IsPreviewValid);
+        Assert.Contains(window.GetVisualDescendants(), v => v is SummaryView);
+
+        await page.SubmitCommand.ExecuteAsync(null);
+        Dispatcher.UIThread.RunJobs();
+        var result = Assert.IsType<PlanBoardViewModel>(page.Result);
+        Assert.True(result.IsExecuted);
+        Assert.Empty(page.Steps);
+        Assert.Contains(window.GetVisualDescendants(), v => v is PlanBoardView);
+        window.Close();
+    }
+
+    private static void Fill(NewPlanViewModel page, params (string Key, string Value)[] values)
+    {
+        foreach (var (key, value) in values)
+            page.Fields.Single(f => f.Key == key).Value = value;
     }
 
     /// <summary>

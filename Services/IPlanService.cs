@@ -22,8 +22,14 @@ public interface IPlanService
     /// <summary>Raised on the UI thread whenever a plan is added or changes status.</summary>
     event EventHandler<Plan>? PlanChanged;
 
-    /// <summary>Reversible plans execute right away; critical plans wait for approval.</summary>
-    Task SubmitAsync(Plan plan);
+    /// <summary>Validates and simulates a draft for the current session; nothing is written.</summary>
+    Task<PlanPreview> PreviewAsync(PlanDraft draft);
+
+    /// <summary>
+    /// Stores and processes a draft for the current session: invalid drafts become failed plans, reversible plans
+    /// execute right away and critical plans wait for approval. Returns the stored plan.
+    /// </summary>
+    Task<Plan> SubmitAsync(PlanDraft draft);
 
     /// <exception cref="UnauthorizedAccessException">The approver is the requester or lacks <c>plan.approve</c>.</exception>
     Task ApproveAsync(Plan plan, UserSession approver);

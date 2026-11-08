@@ -229,6 +229,46 @@ class PrivilegeEscalationTests(DatabaseTestCase):
         self.conn.execute("UPDATE plans SET approved_by = 2, status = 'executed' WHERE id = 2")
         self.assertEqual(self.conn.execute("SELECT approved_by FROM plans WHERE id = 2").fetchone(), (2,))
 
+    def test_ai_cannot_reject_plans(self):
+        self.assertDenied(
+            "UPDATE plans SET status = 'rejected', rejected_by = 5, rejection_reason = 'Motivo' WHERE id = 2")
+
+    def test_requester_cannot_reject_own_plan(self):
+        self.assertDenied(
+            "UPDATE plans SET status = 'rejected', rejected_by = 1, rejection_reason = 'Motivo' WHERE id = 2")
+
+    def test_supervisor_can_reject_pending_plan(self):
+        self.conn.execute(
+            "UPDATE plans SET status = 'rejected', rejected_by = 2, rejection_reason = 'Quantidade acima do saldo' "
+            "WHERE id = 2")
+        self.assertEqual(
+            self.conn.execute("SELECT status, rejected_by, rejection_reason FROM plans WHERE id = 2").fetchone(),
+            ("rejected", 2, "Quantidade acima do saldo"))
+
+    def test_rejected_status_requires_rejecter_and_reason(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE plans SET status = 'rejected', rejected_by = 2 WHERE id = 2")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("UPDATE plans SET status = 'rejected', rejection_reason = 'Motivo' WHERE id = 2")
+
+    def test_rejection_reason_is_limited_to_200_characters(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "UPDATE plans SET status = 'rejected', rejected_by = 2, rejection_reason = ? WHERE id = 2",
+                ("x" * 201,))
+
+    def test_plan_cannot_be_both_approved_and_rejected(self):
+        with self.assertRaisesRegex(sqlite3.DatabaseError, "both approved and rejected"):
+            self.conn.execute(
+                "UPDATE plans SET status = 'rejected', approved_by = 2, rejected_by = 2, "
+                "rejection_reason = 'Motivo' WHERE id = 2")
+
+    def test_rejected_plan_is_immutable(self):
+        self.conn.execute(
+            "UPDATE plans SET status = 'rejected', rejected_by = 2, rejection_reason = 'Motivo' WHERE id = 2")
+        self.assertDenied("UPDATE plans SET status = 'pending_approval', rejected_by = NULL, rejection_reason = NULL "
+                          "WHERE id = 2")
+
     def test_deny_overrides_allow(self):
         self.conn.execute("INSERT INTO role_permissions VALUES (1, 'plan.approve', 'ALLOW')")
         self.assertFalse(is_allowed(self.conn, 1, "plan.approve"))

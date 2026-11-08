@@ -213,16 +213,17 @@ classDiagram
 
 ```mermaid
 classDiagram
-    class Plan {
-        +string Intent
-        +PlanStep[] Steps
+    class PlanDocument {
         +string DslVersion
-        +RiskLevel Risk
-        +PlanStatus Status
+        +string Intent
+        +string? Skill
+        +PlanStepDocument[] Steps
+        +ToJson() string
     }
-    class PlanStep {
+    class PlanStepDocument {
+        +int Index
         +string Op
-        +JsonElement Args
+        +JsonObject Args
         +string? As
     }
     class RiskLevel {
@@ -233,68 +234,102 @@ classDiagram
     }
     class Recipe {
         +string Name
-        +Plan Template
+        +PlanDocument Template
         +JsonSchema Parameters
         +RecipeStatus Status
     }
-    class IOperation {
-        <<interface>>
+    class DslParser {
+        +Parse(string json) DslParseResult
+    }
+    class OperationCatalog {
+        +OperationDefinition[] V1
+        +TryGet(string op) OperationDefinition
+    }
+    class OperationDefinition {
         +string Name
         +RiskLevel Risk
-        +string RequiredPermission
-        +Validate(PlanStep step, StockSnapshot state) ValidationResult
-        +Apply(PlanStep step, DbTransaction tx)
+        +string Permission
+        +JsonSchema ArgsSchema
     }
-    class MoveStockOperation
-    class ReceiveGoodsOperation
-    class AdjustStockOperation
-    IOperation <|.. MoveStockOperation
-    IOperation <|.. ReceiveGoodsOperation
-    IOperation <|.. AdjustStockOperation
+    class IOperationHandler {
+        <<interface>>
+        +string Op
+        +Validate(EngineContext ctx, PlanStepDocument step, JsonObject args) PlanError[]
+        +Apply(EngineContext ctx, PlanStepDocument step, JsonObject args) string
+    }
+    class ReceiveGoodsHandler
+    class MoveStockHandler
+    class AdjustStockHandler
+    class CreateProductHandler
+    class CreateLocationHandler
+    IOperationHandler <|.. ReceiveGoodsHandler
+    IOperationHandler <|.. MoveStockHandler
+    IOperationHandler <|.. AdjustStockHandler
+    IOperationHandler <|.. CreateProductHandler
+    IOperationHandler <|.. CreateLocationHandler
 
-    class PlanValidator {
-        +Validate(Plan plan, Principal principal) ValidationResult
+    class PlanRunner {
+        +Run(EngineContext ctx, PlanDocument plan, isAllowed) RunResult
     }
     class PlanSimulator {
-        +Simulate(Plan plan) StockDiff
-    }
-    class ApprovalService {
-        +RequestAsync(Plan plan, StockDiff diff) Task~Approval~
+        +Simulate(UserSession requester, PlanDocument plan, isAllowed) RunResult
     }
     class PlanExecutor {
-        +ExecuteAsync(Plan plan) Task~ExecutionResult~
+        +Execute(UserSession requester, PlanDocument plan, long planId, isAllowed, onSuccess, onFailure) RunResult
+    }
+    class PlanEngine {
+        +Preview(UserSession requester, string json) EnginePreview
+        +Submit(UserSession requester, string json, string plannedBy) EngineSubmission
+        +Approve(UserSession approver, long planId)
+        +Reject(UserSession approver, long planId, string reason)
+    }
+    class PlanDiff {
+        +BalanceDelta[] Balances
+        +MoveDelta[] Moves
+        +CreatedRecord[] Created
+        +ToSummary(RiskLevel risk) ExecutionSummary
     }
     class PolicyEngine {
-        +IsAllowed(Principal p, string permission) bool
-        +ForAi(User requester) Principal
-        +WarehouseScope(Principal p) int
+        +IsAllowed(UserSession s, string permission) bool
+        +Require(UserSession s, string permission)
+        +EffectiveForAi(UserSession user) string[]
+        +PermissionsForRole(long roleId) string[]
     }
-    class Principal {
-        +User User
-        +bool IsAi
-        +string[] EffectivePermissions
+    class UserSession {
+        +long UserId
+        +long RoleId
+        +long WarehouseId
+        +string[] Permissions
     }
     class AuditLog {
-        +AppendAsync(AuditEntry entry) Task
-        +VerifyChainAsync() Task~bool~
+        +Append(AuditEntry entry) long
+        +AppendWithin(connection, transaction, AuditEntry entry) long
+    }
+    class AuditVerifier {
+        +Verify(connection) AuditVerification
     }
     class ColumnCipher {
-        +Encrypt(string plain) EncryptedValue
-        +Decrypt(EncryptedValue value) string
+        +Encrypt(string plain, string table, string column, long id) byte[]
+        +Decrypt(byte[] value, string table, string column, long id) string
     }
 
-    Plan *-- PlanStep
-    Plan --> RiskLevel
-    Recipe --> Plan
-    PlanValidator --> IOperation
-    PlanValidator --> PolicyEngine
-    PlanSimulator --> Plan
-    PlanExecutor --> IOperation
-    PlanExecutor --> AuditLog
-    PlanExecutor --> ColumnCipher
-    ApprovalService --> PolicyEngine
-    ApprovalService --> AuditLog
-    PolicyEngine --> Principal
+    PlanDocument *-- PlanStepDocument
+    Recipe --> PlanDocument
+    DslParser --> OperationCatalog
+    OperationCatalog *-- OperationDefinition
+    OperationDefinition --> RiskLevel
+    PlanRunner --> IOperationHandler
+    PlanRunner --> PlanDiff
+    PlanSimulator --> PlanRunner
+    PlanExecutor --> PlanRunner
+    PlanEngine --> DslParser
+    PlanEngine --> PlanSimulator
+    PlanEngine --> PlanExecutor
+    PlanEngine --> PolicyEngine
+    PlanEngine --> AuditLog
+    CreateProductHandler --> ColumnCipher
+    PolicyEngine --> UserSession
+    AuditVerifier --> AuditLog
 ```
 
 ## 5. Componentes e implantação

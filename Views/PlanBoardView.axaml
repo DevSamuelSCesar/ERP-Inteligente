@@ -11,7 +11,7 @@
     </UserControl.Styles>
 
     <!-- Plan board: flat panel, square corners, 1 px rule, no shadow (references/UI.md, section 5) -->
-    <Border Classes="board" HorizontalAlignment="Left" VerticalAlignment="Top" MinWidth="560" MaxWidth="900">
+    <Border Classes="board" HorizontalAlignment="Left" VerticalAlignment="Top" MinWidth="620" MaxWidth="960">
         <StackPanel>
             <!-- Critical plans: 2 px amber rule on top; risk is not an error -->
             <Rectangle Height="2" Fill="{DynamicResource StatusWarningBrush}" IsVisible="{Binding IsCritical}" />
@@ -28,22 +28,24 @@
             <Rectangle Classes="rule" />
 
             <!-- Steps as tabular lines -->
-            <Grid Classes="stepLine" ColumnDefinitions="88,96,96,96,*" Margin="14,8,14,4">
-                <TextBlock Grid.Column="0" Classes="label" Text="Qtd" />
-                <TextBlock Grid.Column="1" Classes="label" Text="SKU" />
-                <TextBlock Grid.Column="2" Classes="label" Text="De / Endereço" />
-                <TextBlock Grid.Column="3" Classes="label" Text="Para" />
-                <TextBlock Grid.Column="4" Classes="label" Text="Observação" />
+            <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Margin="14,8,14,4">
+                <TextBlock Grid.Column="0" Classes="label" Text="Operação" />
+                <TextBlock Grid.Column="1" Classes="label" Text="Qtd" />
+                <TextBlock Grid.Column="2" Classes="label" Text="SKU" />
+                <TextBlock Grid.Column="3" Classes="label" Text="De / Endereço" />
+                <TextBlock Grid.Column="4" Classes="label" Text="Para" />
+                <TextBlock Grid.Column="5" Classes="label" Text="Observação" />
             </Grid>
             <ItemsControl ItemsSource="{Binding Steps}" Margin="14,0,14,10">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:PlanStepLine">
-                        <Grid Classes="stepLine" ColumnDefinitions="88,96,96,96,*" Height="26">
-                            <TextBlock Grid.Column="0" Classes="tabular" Text="{Binding Quantity}" />
-                            <TextBlock Grid.Column="1" Classes="tabular" Text="{Binding Sku}" />
-                            <TextBlock Grid.Column="2" Classes="tabular" Text="{Binding From}" />
-                            <TextBlock Grid.Column="3" Classes="tabular" Text="{Binding To}" />
-                            <TextBlock Grid.Column="4" Text="{Binding Note}" TextTrimming="CharacterEllipsis"
+                        <Grid Classes="stepLine" ColumnDefinitions="140,80,84,92,92,*" Height="26">
+                            <TextBlock Grid.Column="0" Text="{Binding Operation}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Classes="tabular" Text="{Binding Quantity}" />
+                            <TextBlock Grid.Column="2" Classes="tabular" Text="{Binding Sku}" />
+                            <TextBlock Grid.Column="3" Classes="tabular" Text="{Binding From}" />
+                            <TextBlock Grid.Column="4" Classes="tabular" Text="{Binding To}" />
+                            <TextBlock Grid.Column="5" Text="{Binding Note}" TextTrimming="CharacterEllipsis"
                                        ToolTip.Tip="{Binding Note}" />
                         </Grid>
                     </DataTemplate>

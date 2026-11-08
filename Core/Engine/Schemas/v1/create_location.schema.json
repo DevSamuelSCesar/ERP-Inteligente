@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_location",
+  "description": "Cadastra um endereço de armazenagem.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "zone", "capacity"],
+  "properties": {
+    "code": { "type": "string", "pattern": "^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$", "maxLength": 10, "description": "Código do endereço (A-01-01)." },
+    "zone": { "type": "string", "pattern": "^[A-Z]{1,4}$", "maxLength": 4, "description": "Código da zona." },
+    "capacity": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Capacidade em unidades." }
+  }
+}

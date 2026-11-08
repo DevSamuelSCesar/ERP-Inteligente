@@ -2,6 +2,7 @@ using System;
 using erp_inteligente.Core.Audit;
 using erp_inteligente.Core.Auth;
 using erp_inteligente.Core.Data;
+using erp_inteligente.Core.Engine;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Core.Security;
 using erp_inteligente.Services;
@@ -25,6 +26,7 @@ public sealed class AppHost : IDisposable
         ApplicationDb = new ApplicationDb(database, Policy);
         Auth = new AuthService(database, new PasswordHasher(passwordParameters), Policy, AuditLog, time, authOptions);
         Session = new SessionService(Auth, time, authOptions);
+        Engine = new PlanEngine(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
     }
 
@@ -35,6 +37,7 @@ public sealed class AppHost : IDisposable
     public ApplicationDb ApplicationDb { get; }
     public AuthService Auth { get; }
     public SessionService Session { get; }
+    public PlanEngine Engine { get; }
 
     /// <summary>Last verification of the audit hash chain (at startup and at every login).</summary>
     public AuditVerification AuditStatus { get; private set; }
@@ -55,7 +58,7 @@ public sealed class AppHost : IDisposable
     public ShellViewModel CreateShell(IDialogService dialogs) =>
         new(Session,
             new SqliteQueryService(ApplicationDb, Session),
-            new SqlitePlanService(ApplicationDb, Session),
+            new EnginePlanService(Engine, ApplicationDb, Session),
             new ReadOnlyNexusService(Database, Policy, AuditLog),
             dialogs,
             Time,

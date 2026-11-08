@@ -160,9 +160,13 @@ O teste `OptimizationTests` confere automaticamente que os planos de execução 
 | Força bruta de senha e enumeração de usuários | `AuthServiceTests` (C#): bloqueio após 5 falhas, mesma resposta para usuário inexistente | Automatizado ✅ |
 | Leitura de outro armazém | `ApplicationDbTests` e `SqliteQueryServiceTests` (C#) | Automatizado ✅ |
 | Adulteração da auditoria (linha alterada ou elo quebrado) | `AuditChainTests` (Python) e `AuditVerifierTests` (C#) | Automatizado ✅ |
+| Plano malicioso (JSON gigante ou profundo, chave duplicada, operação fora do catálogo, referência inválida, campo extra, formato inválido) | `DslParserTests` e `SchemaValidatorTests` (C#) | Automatizado ✅ |
+| Autoaprovação, aprovação ou rejeição pela IA, aprovação por quem não tem `plan.approve` | `PlanEngineTests` (C#) + triggers testados em `PrivilegeEscalationTests` (Python) | Automatizado ✅ |
+| Operação acima dos direitos de quem pediu, mesmo aprovada por supervisor | `PlanEngineTests` (C#): o plano falha com a mensagem de permissão | Automatizado ✅ |
+| Estado mudou entre simulação e aprovação (corrida) | `PlanEngineTests` (C#): o plano falha e nada é gravado | Automatizado ✅ |
 | Payloads nos argumentos de todas as ferramentas da IA | Testes da aplicação C# | Quando o Planner existir (feature 3) |
 
 ```bash
-python3 -m unittest discover -s db/tests -v   # 27 testes
-dotnet test tests/Nexus.Tests                 # 267 testes do app
+python3 -m unittest discover -s db/tests -v   # 34 testes
+dotnet test tests/Nexus.Tests                 # 458 testes do app
 ```

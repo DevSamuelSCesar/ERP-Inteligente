@@ -10,7 +10,7 @@ using erp_inteligente.Services;
 namespace erp_inteligente.ViewModels;
 
 /// <summary>A plan step formatted for the board's tabular lines.</summary>
-public sealed record PlanStepLine(string Quantity, string Sku, string From, string To, string Note);
+public sealed record PlanStepLine(string Operation, string Quantity, string Sku, string From, string To, string Note);
 
 /// <summary>
 /// The plan board (references/UI.md, section 5): business-language steps, risk, and the accept/reject prompt,
@@ -119,9 +119,15 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
         };
     }
 
-    private static PlanStepLine ToLine(PlanStep step) => step.Operation switch
+    internal static PlanStepLine ToLine(PlanStep step) => step.Operation switch
     {
-        PlanOperation.AdjustStock => new PlanStepLine($"{step.Quantity:+0;-0;0} {step.Unit}", step.Sku, step.From ?? "", "", step.Note ?? ""),
-        _ => new PlanStepLine($"{step.Quantity} {step.Unit}", step.Sku, step.From ?? "", step.To ?? "", step.Note ?? ""),
+        PlanOperation.ReceiveGoods => new("Recebimento", $"{step.Quantity} {step.Unit}", step.Sku, "", step.To ?? "", Lot(step.Note)),
+        PlanOperation.MoveStock => new("Movimentação", $"{step.Quantity} {step.Unit}", step.Sku, step.From ?? "", step.To ?? "", Lot(step.Note)),
+        PlanOperation.AdjustStock => new("Ajuste", $"{step.Quantity:+0;-0;0} {step.Unit}", step.Sku, step.From ?? "", "", step.Note ?? ""),
+        PlanOperation.CreateProduct => new("Cadastro de produto", "", step.Sku, "", "", $"{step.Note} ({step.Unit})"),
+        PlanOperation.CreateLocation => new("Cadastro de endereço", $"cap. {step.Quantity}", "", $"zona {step.From}", step.To ?? "", ""),
+        _ => new(step.Operation.ToString(), $"{step.Quantity} {step.Unit}", step.Sku, step.From ?? "", step.To ?? "", step.Note ?? ""),
     };
+
+    private static string Lot(string? lot) => string.IsNullOrEmpty(lot) ? "" : $"lote {lot}";
 }

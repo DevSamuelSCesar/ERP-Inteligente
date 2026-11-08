@@ -20,7 +20,7 @@ public class ViewModelTests
         var shell = Shell(new DemoWorld(), DemoSessionService.Operator);
 
         var labels = shell.MenuItems.Select(i => i.Label).ToList();
-        Assert.Equal(["Nexus", "Estoque", "Endereços", "Pedidos", "Planos", "Receitas"], labels);
+        Assert.Equal(["Nexus", "Novo plano", "Estoque", "Endereços", "Pedidos", "Planos", "Receitas"], labels);
     }
 
     [Fact]

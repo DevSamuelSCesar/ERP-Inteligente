@@ -150,8 +150,8 @@ public class AuthServiceTests : IDisposable
         var policy = new erp_inteligente.Core.Policy.PolicyEngine(db.Database, audit);
         var auth = new AuthService(db.Database, new PasswordHasher(Argon2Parameters.Default), policy, audit, _f.Time, AuthOptions.Default);
 
-        Assert.IsType<LoginResult.Succeeded>(await auth.LoginAsync("sup.maria", "nexus-demo-2026"));
-        Assert.IsType<LoginResult.Failed>(await auth.LoginAsync("sup.maria", "nexus-demo-2027"));
+        Assert.IsType<LoginResult.Succeeded>(await auth.LoginAsync("sup.maria", "demo"));
+        Assert.IsType<LoginResult.Failed>(await auth.LoginAsync("sup.maria", "demo2"));
     }
 
     [Fact]

@@ -19,7 +19,7 @@ public class DemoPlanServiceTests
         var w = new DemoWorld();
         var plan = Move(w, 15);
 
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         Assert.Equal(PlanStatus.Executed, plan.Status);
         Assert.Equal(25, w.Data.QuantityAt("ABC-123", "DOCA-01"));
@@ -34,7 +34,7 @@ public class DemoPlanServiceTests
         var w = new DemoWorld();
         var plan = Adjust(w, -2);
 
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         Assert.Equal(PlanStatus.PendingApproval, plan.Status);
         Assert.Equal(36, w.Data.QuantityAt("ALI-300", "C-01-01"));
@@ -45,7 +45,7 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Adjust(w, -2, by: "sup.maria");
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => w.Plans.ApproveAsync(plan, DemoSessionService.Supervisor));
         Assert.Equal(PlanStatus.PendingApproval, plan.Status);
@@ -56,7 +56,7 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Adjust(w, -2, by: "sup.maria");
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => w.Plans.ApproveAsync(plan, DemoSessionService.Operator));
     }
@@ -66,7 +66,7 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Adjust(w, -2);
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         await w.Plans.ApproveAsync(plan, DemoSessionService.Supervisor);
 
@@ -85,7 +85,7 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Adjust(w, -2);
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         await Assert.ThrowsAsync<ArgumentException>(() => w.Plans.RejectAsync(plan, DemoSessionService.Supervisor, reason));
         Assert.Equal(PlanStatus.PendingApproval, plan.Status);
@@ -96,7 +96,7 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Adjust(w, -2);
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         await w.Plans.RejectAsync(plan, DemoSessionService.Supervisor, "  Contagem errada ");
 
@@ -111,7 +111,7 @@ public class DemoPlanServiceTests
         var w = new DemoWorld();
         var plan = Move(w, 41);
 
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         Assert.Equal(PlanStatus.Failed, plan.Status);
         Assert.Contains("DOCA-01 tem só 40", plan.FailureMessage);
@@ -124,7 +124,7 @@ public class DemoPlanServiceTests
         var w = new DemoWorld();
         var plan = Adjust(w, -1, note: null);
 
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
         Assert.Equal(PlanStatus.Failed, plan.Status);
     }
@@ -134,8 +134,8 @@ public class DemoPlanServiceTests
     {
         var w = new DemoWorld();
         var plan = Move(w, 1);
-        await w.Plans.SubmitAsync(plan);
+        await w.Plans.SubmitPlanAsync(plan);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => w.Plans.SubmitAsync(plan));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => w.Plans.SubmitPlanAsync(plan));
     }
 }

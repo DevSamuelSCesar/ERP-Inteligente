@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
              x:Class="erp_inteligente.Views.SummaryView"
              x:DataType="vm:SummaryViewModel">
 
@@ -41,7 +42,23 @@
             </ItemsControl.ItemTemplate>
         </ItemsControl>
 
-        <!-- adjust_stock: balance before (Data5) and after (Data1) -->
+        <!-- create_product / create_location: the new records -->
+        <ItemsControl ItemsSource="{Binding Created}" Margin="14,12,14,4" IsVisible="{Binding HasCreated}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="m:CreatedItem">
+                    <Grid ColumnDefinitions="140,104,*" Margin="0,0,0,8">
+                        <TextBlock Classes="label" Text="{Binding Kind}" VerticalAlignment="Center" />
+                        <Border Grid.Column="1" Classes="location">
+                            <TextBlock Classes="tabular" Text="{Binding Code}" HorizontalAlignment="Center" />
+                        </Border>
+                        <TextBlock Grid.Column="2" Text="{Binding Description}" Margin="12,0,0,0" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- receive_goods / adjust_stock: balance before (Data5) and after (Data1) -->
         <StackPanel Margin="14,12,14,12" Spacing="10" IsVisible="{Binding HasBalances}">
             <StackPanel Orientation="Horizontal" Spacing="16">
                 <StackPanel Orientation="Horizontal" Spacing="6">

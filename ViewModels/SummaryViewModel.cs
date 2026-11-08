@@ -18,6 +18,7 @@ public sealed class SummaryViewModel : ViewModelBase
     public SummaryViewModel(ExecutionSummary summary)
     {
         Totals = summary.Totals;
+        Created = summary.CreatedItems;
         Flows = summary.Flows.Select(f => new MoveFlowLine(f.Sku, $"{f.Quantity} {f.Unit}", f.From, f.To)).ToList();
 
         var max = Math.Max(1, summary.Balances.Select(b => Math.Max(b.Before, b.After)).DefaultIfEmpty(0).Max());
@@ -27,9 +28,11 @@ public sealed class SummaryViewModel : ViewModelBase
             .ToList();
     }
 
+    public IReadOnlyList<CreatedItem> Created { get; }
     public IReadOnlyList<SummaryTotal> Totals { get; }
     public IReadOnlyList<MoveFlowLine> Flows { get; }
     public IReadOnlyList<BalanceBarLine> Balances { get; }
     public bool HasFlows => Flows.Count > 0;
     public bool HasBalances => Balances.Count > 0;
+    public bool HasCreated => Created.Count > 0;
 }

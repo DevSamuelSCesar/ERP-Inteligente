@@ -13,7 +13,7 @@ namespace Nexus.Tests;
 /// </summary>
 public sealed class TestApp : IDisposable
 {
-    public const string DemoPassword = "nexus-demo-2026";
+    public const string DemoPassword = "demo";
 
     private readonly TestDatabase _db = new();
 

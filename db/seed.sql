@@ -60,13 +60,13 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
 
 INSERT INTO warehouses (id, code, name) VALUES (1, 'CD-01', 'Centro de Distribuição Fictício 01');
 
--- Demo password for every human user: nexus-demo-2026 (documented in README.md; fictitious data only).
+-- Demo password for every human user: demo (documented in README.md; fictitious data only).
 -- Argon2id PHC hashes, m=64 MiB, t=3, p=4 (references/ARQUITETURA.md, section 12.3). svc.ia never logs in.
 INSERT INTO users (id, username, display_name, password_hash, role_id, warehouse_id) VALUES
-    (1, 'op.joao',   'João (operador)',      '$argon2id$v=19$m=65536,t=3,p=4$4H3UK/Bmc+aoDlJBaqyenA$qVxvHSzAzpt4OnIntR3nD14T/SSD/TSRo8ARXm5bBeU',   1, 1),
-    (2, 'sup.maria', 'Maria (supervisora)',  '$argon2id$v=19$m=65536,t=3,p=4$qDb4i5a/Q7pRKB42TQvh7w$74hTtoahWJTTZBGVt9YVSrP/0x9IAX6vNU5PALEeOsY', 2, 1),
-    (3, 'adm.carlos','Carlos (administrador)','$argon2id$v=19$m=65536,t=3,p=4$u6+exbn+H/J0CbgXzHqQEw$P0rgm1gX3qvwNfWyTdpvZxeE8y5m97oCUwztYYvS9pk',3, 1),
-    (4, 'aud.lucia', 'Lúcia (auditora)',     '$argon2id$v=19$m=65536,t=3,p=4$LCPw3cwEL2flFKGWlwGyBw$gc8yzrgocnj440mK4A6E76EjX/64uAT8rkpzLrDISXs', 4, 1),
+    (1, 'op.joao',   'João (operador)',      '$argon2id$v=19$m=65536,t=3,p=4$nqN+GxHYJbAl3p4JDrtF0w$6vn3eeADPWe1PZ/tcMhn7vBpk9VMzBgNneefuOBzsBE',   1, 1),
+    (2, 'sup.maria', 'Maria (supervisora)',  '$argon2id$v=19$m=65536,t=3,p=4$LHTzEHWBbd2e+1nLzx77OQ$pI8lj+Ak2xPg/z8VOXLr8dlbL+7O/nFUDUMfCllqBz4', 2, 1),
+    (3, 'adm.carlos','Carlos (administrador)','$argon2id$v=19$m=65536,t=3,p=4$rWfBWwMAcH6POiYYHyzQYw$McBlLHK9i8Uq1PTjsNuGYJvbqBT0lvQ883q5q/4BlS8',3, 1),
+    (4, 'aud.lucia', 'Lúcia (auditora)',     '$argon2id$v=19$m=65536,t=3,p=4$3yuFBv8plrBH67sXnZd8Sg$vwZLCHQ2VNDUjlLH25zIpurlFbvB3s9obrcfwFh23m4', 4, 1),
     (5, 'svc.ia',    'Agente IA',            'service-account:no-password', 5, 1);
 
 INSERT INTO zones (id, warehouse_id, code, name) VALUES

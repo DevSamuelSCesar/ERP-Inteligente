@@ -11,8 +11,15 @@ public sealed record MoveFlow(string Sku, int Quantity, string Unit, string From
 /// <summary>Balance of a SKU at a location before and after the execution.</summary>
 public sealed record BalanceChange(string Sku, string Location, int Before, int After, string Unit);
 
-/// <summary>What was operated, built from the executor result (never from LLM text).</summary>
+/// <summary>A catalog record created by a plan (product or location).</summary>
+public sealed record CreatedItem(string Kind, string Code, string Description);
+
+/// <summary>What was operated (or would be, in a preview), built from the engine result, never from LLM text.</summary>
 public sealed record ExecutionSummary(
     IReadOnlyList<SummaryTotal> Totals,
     IReadOnlyList<MoveFlow> Flows,
-    IReadOnlyList<BalanceChange> Balances);
+    IReadOnlyList<BalanceChange> Balances,
+    IReadOnlyList<CreatedItem>? Created = null)
+{
+    public IReadOnlyList<CreatedItem> CreatedItems => Created ?? [];
+}

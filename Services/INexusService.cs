@@ -5,8 +5,8 @@ using erp_inteligente.Models;
 
 namespace erp_inteligente.Services;
 
-/// <summary>Answer of the Nexus to a request: short plain text and, when data must change, a plan.</summary>
-public sealed record NexusReply(string Text, Plan? Plan = null, bool IsError = false);
+/// <summary>Answer of the Nexus to a request: short plain text and, when data must change, a draft for the engine.</summary>
+public sealed record NexusReply(string Text, PlanDraft? Draft = null, bool IsError = false);
 
 /// <summary>Turns a natural-language request into a reply or a plan (the Planner, seen from the UI).</summary>
 public interface INexusService

@@ -20,10 +20,14 @@ public enum PlanStatus
     Failed,
 }
 
+/// <summary>Write operations of the DSL v1 catalog (references/ARQUITETURA.md, section 5).</summary>
 public enum PlanOperation
 {
+    ReceiveGoods,
     MoveStock,
     AdjustStock,
+    CreateProduct,
+    CreateLocation,
 }
 
 /// <summary>One step of a plan, already expressed in business terms for display.</summary>

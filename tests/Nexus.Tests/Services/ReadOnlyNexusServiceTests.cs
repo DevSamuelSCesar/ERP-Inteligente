@@ -39,7 +39,7 @@ public class ReadOnlyNexusServiceTests : IDisposable
         var reply = await _nexus.SendAsync("Qual o saldo do ABC-123?", session, status, TestContext.Current.CancellationToken);
 
         Assert.False(reply.IsError);
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
         Assert.Equal(AbcStockReply, reply.Text);
         Assert.Equal("Consultando saldo do ABC-123", Assert.Single(status.Lines));
         Assert.Equal(1, AiQueryAudit("sku:ABC-123", "allowed", session.UserId));
@@ -74,7 +74,7 @@ public class ReadOnlyNexusServiceTests : IDisposable
         var reply = await Ask("Guarde as 40 caixas do ABC-123 que estão na doca", "sup.maria");
 
         Assert.False(reply.IsError);
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
         Assert.Equal(ChangesReply, reply.Text);
         Assert.Equal(stockBefore, _f.Scalar("SELECT SUM(quantity) FROM stock_balances"));
         Assert.Equal(movementsBefore, _f.Scalar("SELECT count(*) FROM stock_movements"));
@@ -86,7 +86,7 @@ public class ReadOnlyNexusServiceTests : IDisposable
         var reply = await Ask("bom dia", "sup.maria");
 
         Assert.False(reply.IsError);
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
         Assert.StartsWith("Não entendi", reply.Text);
         Assert.Contains("saldo", reply.Text);
     }

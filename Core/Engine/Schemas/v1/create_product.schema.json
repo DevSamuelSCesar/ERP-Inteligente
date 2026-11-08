@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "create_product",
+  "description": "Cadastra um produto.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sku", "name", "unit"],
+  "properties": {
+    "sku": { "type": "string", "pattern": "^[A-Z]{3}-[0-9]{3}$", "maxLength": 7, "description": "SKU do novo produto (ABC-123)." },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120, "description": "Nome do produto." },
+    "unit": { "type": "string", "pattern": "^[a-z]{1,4}$", "maxLength": 4, "description": "Unidade de medida (un, kg, cx)." },
+    "description": { "type": "string", "maxLength": 500, "description": "Descrição." },
+    "weight_kg": { "type": "number", "minimum": 0, "maximum": 10000, "description": "Peso em kg." },
+    "tracks_expiry": { "type": "boolean", "description": "Se o produto controla validade." },
+    "unit_cost": { "type": "number", "minimum": 0, "maximum": 1000000000, "description": "Custo unitário." }
+  }
+}

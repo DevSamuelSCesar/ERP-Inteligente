@@ -357,16 +357,17 @@ classDiagram
 
 ```mermaid
 classDiagram
-    class Plan {
-        +string Intent
-        +PlanStep[] Steps
+    class PlanDocument {
         +string DslVersion
-        +RiskLevel Risk
-        +PlanStatus Status
+        +string Intent
+        +string? Skill
+        +PlanStepDocument[] Steps
+        +ToJson() string
     }
-    class PlanStep {
+    class PlanStepDocument {
+        +int Index
         +string Op
-        +JsonElement Args
+        +JsonObject Args
         +string? As
     }
     class RiskLevel {
@@ -377,68 +378,102 @@ classDiagram
     }
     class Recipe {
         +string Name
-        +Plan Template
+        +PlanDocument Template
         +JsonSchema Parameters
         +RecipeStatus Status
     }
-    class IOperation {
-        <<interface>>
+    class DslParser {
+        +Parse(string json) DslParseResult
+    }
+    class OperationCatalog {
+        +OperationDefinition[] V1
+        +TryGet(string op) OperationDefinition
+    }
+    class OperationDefinition {
         +string Name
         +RiskLevel Risk
-        +string RequiredPermission
-        +Validate(PlanStep step, StockSnapshot state) ValidationResult
-        +Apply(PlanStep step, DbTransaction tx)
+        +string Permission
+        +JsonSchema ArgsSchema
     }
-    class MoveStockOperation
-    class ReceiveGoodsOperation
-    class AdjustStockOperation
-    IOperation <|.. MoveStockOperation
-    IOperation <|.. ReceiveGoodsOperation
-    IOperation <|.. AdjustStockOperation
+    class IOperationHandler {
+        <<interface>>
+        +string Op
+        +Validate(EngineContext ctx, PlanStepDocument step, JsonObject args) PlanError[]
+        +Apply(EngineContext ctx, PlanStepDocument step, JsonObject args) string
+    }
+    class ReceiveGoodsHandler
+    class MoveStockHandler
+    class AdjustStockHandler
+    class CreateProductHandler
+    class CreateLocationHandler
+    IOperationHandler <|.. ReceiveGoodsHandler
+    IOperationHandler <|.. MoveStockHandler
+    IOperationHandler <|.. AdjustStockHandler
+    IOperationHandler <|.. CreateProductHandler
+    IOperationHandler <|.. CreateLocationHandler
 
-    class PlanValidator {
-        +Validate(Plan plan, Principal principal) ValidationResult
+    class PlanRunner {
+        +Run(EngineContext ctx, PlanDocument plan, isAllowed) RunResult
     }
     class PlanSimulator {
-        +Simulate(Plan plan) StockDiff
-    }
-    class ApprovalService {
-        +RequestAsync(Plan plan, StockDiff diff) Task~Approval~
+        +Simulate(UserSession requester, PlanDocument plan, isAllowed) RunResult
     }
     class PlanExecutor {
-        +ExecuteAsync(Plan plan) Task~ExecutionResult~
+        +Execute(UserSession requester, PlanDocument plan, long planId, isAllowed, onSuccess, onFailure) RunResult
+    }
+    class PlanEngine {
+        +Preview(UserSession requester, string json) EnginePreview
+        +Submit(UserSession requester, string json, string plannedBy) EngineSubmission
+        +Approve(UserSession approver, long planId)
+        +Reject(UserSession approver, long planId, string reason)
+    }
+    class PlanDiff {
+        +BalanceDelta[] Balances
+        +MoveDelta[] Moves
+        +CreatedRecord[] Created
+        +ToSummary(RiskLevel risk) ExecutionSummary
     }
     class PolicyEngine {
-        +IsAllowed(Principal p, string permission) bool
-        +ForAi(User requester) Principal
-        +WarehouseScope(Principal p) int
+        +IsAllowed(UserSession s, string permission) bool
+        +Require(UserSession s, string permission)
+        +EffectiveForAi(UserSession user) string[]
+        +PermissionsForRole(long roleId) string[]
     }
-    class Principal {
-        +User User
-        +bool IsAi
-        +string[] EffectivePermissions
+    class UserSession {
+        +long UserId
+        +long RoleId
+        +long WarehouseId
+        +string[] Permissions
     }
     class AuditLog {
-        +AppendAsync(AuditEntry entry) Task
-        +VerifyChainAsync() Task~bool~
+        +Append(AuditEntry entry) long
+        +AppendWithin(connection, transaction, AuditEntry entry) long
+    }
+    class AuditVerifier {
+        +Verify(connection) AuditVerification
     }
     class ColumnCipher {
-        +Encrypt(string plain) EncryptedValue
-        +Decrypt(EncryptedValue value) string
+        +Encrypt(string plain, string table, string column, long id) byte[]
+        +Decrypt(byte[] value, string table, string column, long id) string
     }
 
-    Plan *-- PlanStep
-    Plan --> RiskLevel
-    Recipe --> Plan
-    PlanValidator --> IOperation
-    PlanValidator --> PolicyEngine
-    PlanSimulator --> Plan
-    PlanExecutor --> IOperation
-    PlanExecutor --> AuditLog
-    PlanExecutor --> ColumnCipher
-    ApprovalService --> PolicyEngine
-    ApprovalService --> AuditLog
-    PolicyEngine --> Principal
+    PlanDocument *-- PlanStepDocument
+    Recipe --> PlanDocument
+    DslParser --> OperationCatalog
+    OperationCatalog *-- OperationDefinition
+    OperationDefinition --> RiskLevel
+    PlanRunner --> IOperationHandler
+    PlanRunner --> PlanDiff
+    PlanSimulator --> PlanRunner
+    PlanExecutor --> PlanRunner
+    PlanEngine --> DslParser
+    PlanEngine --> PlanSimulator
+    PlanEngine --> PlanExecutor
+    PlanEngine --> PolicyEngine
+    PlanEngine --> AuditLog
+    CreateProductHandler --> ColumnCipher
+    PolicyEngine --> UserSession
+    AuditVerifier --> AuditLog
 ```
 
 ### Componentes e implantação
@@ -517,12 +552,22 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
   - **Policy engine:** confere a permissão no banco a cada consulta (*deny-overrides*) e preenche o `$warehouse_id` da sessão; a IA age com a interseção dos direitos dela com os do usuário.
   - **Auditoria encadeada:** regra v1 de SHA-256, igual em Python e C#, verificada ao abrir o app e a cada login; uma cadeia quebrada aparece como alerta para quem tem `audit.read`.
   - Regras e números completos em [`references/ARQUITETURA.md`](references/ARQUITETURA.md), seção 12.
+- **Implementado no app (feature 2 do roadmap): motor determinístico de planos.**
+  - **DSL e validação:** DSL JSON v1 validada por JSON Schema, com limites contra entrada maliciosa, e por regras de negócio (saldo disponível, capacidade, lote e validade, escopo do armazém).
+  - **Simulação:** roda o mesmo código da execução, dentro de uma transação desfeita, então a pré-visualização mostra exatamente o que vai acontecer.
+  - **Execução:** transacional, tudo ou nada, com a auditoria gravada na mesma transação.
+  - **Aprovação:**
+    - planos críticos (`adjust_stock`) esperam um supervisor diferente de quem pediu;
+    - a IA nunca aprova;
+    - o que pode rodar é decidido pelos direitos de quem pediu, não de quem aprova.
+  - **Tela "Novo plano":** monta um plano sem LLM, mostra a pré-visualização e envia.
+  - **Atualização de bancos antigos:** um banco existente é atualizado na abertura por migrações versionadas (`db/migrations/`).
 
 ## Parte de integração
 
 - **Diagrama único** juntando banco, LLM e RAG, com permissões, proteção de dados e auditoria marcadas: seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima, incluindo os ataques.
 - **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada nem vê dados sensíveis.
-- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (27 testes) e nos testes do app em `tests/Nexus.Tests` (267 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns e a detecção de adulteração da auditoria): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
+- **Ataques testados:** prompt injection (5 vetores, meta de 0% de sucesso) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (34 testes) e nos testes do app em `tests/Nexus.Tests` (458 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
 
 ## Como rodar
 
@@ -550,9 +595,9 @@ dotnet run -- --db /caminho/nexus.db         # outro arquivo
 dotnet test tests/Nexus.Tests                # testes do app
 ```
 
-No primeiro uso o app cria o banco criptografado a partir dos scripts de `db/` e guarda as chaves no cofre do sistema. Para entrar, use um dos usuários fictícios (`op.joao`, `sup.maria`, `adm.carlos`, `aud.lucia`) com a **senha de demonstração `nexus-demo-2026`**. Essa senha existe só para os dados fictícios do repositório e nunca deve ser usada com dados reais.
+No primeiro uso o app cria o banco criptografado a partir dos scripts de `db/` e guarda as chaves no cofre do sistema. Para entrar, use um dos usuários fictícios (`op.joao`, `sup.maria`, `adm.carlos`, `aud.lucia`) com a **senha de demonstração `demo`**. Essa senha existe só para os dados fictícios do repositório e nunca deve ser usada com dados reais.
 
-O Nexus ainda só consulta: alterar dados chega com o motor de planos (feature 2 do roadmap). Arquivos `.db` são ignorados pelo git.
+Para alterar dados, use a tela **Novo plano**: monte os passos, pré-visualize e envie. Planos de ajuste ficam em **Planos** esperando a aprovação de outro supervisor. O Nexus continua só consultando até o Planner com LLM (feature 3). Arquivos `.db` são ignorados pelo git.
 
 ## Documentação
 

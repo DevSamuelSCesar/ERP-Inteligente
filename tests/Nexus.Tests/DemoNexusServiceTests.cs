@@ -15,9 +15,10 @@ public class DemoNexusServiceTests
 
         var reply = await Ask(w, "Guarde as 40 caixas do ABC-123 que estão na doca");
 
-        Assert.NotNull(reply.Plan);
-        Assert.Equal(PlanRisk.Reversible, reply.Plan.Risk);
-        Assert.Collection(reply.Plan.Steps,
+        Assert.NotNull(reply.Draft);
+        var plan = w.Plans.FromDraft(reply.Draft, DemoSessionService.Supervisor, 0);
+        Assert.Equal(PlanRisk.Reversible, plan.Risk);
+        Assert.Collection(plan.Steps,
             s => Assert.Equal(("DOCA-01", "A-01-01", 20), (s.From, s.To, s.Quantity)),
             s => Assert.Equal(("DOCA-01", "A-02-01", 20), (s.From, s.To, s.Quantity)));
     }
@@ -29,8 +30,9 @@ public class DemoNexusServiceTests
 
         var reply = await Ask(w, "ajuste -1 cx do ALI-300 em C-01-01 por avaria na embalagem");
 
-        var step = Assert.Single(reply.Plan!.Steps);
-        Assert.Equal(PlanRisk.Critical, reply.Plan.Risk);
+        var plan = w.Plans.FromDraft(reply.Draft!, DemoSessionService.Supervisor, 0);
+        var step = Assert.Single(plan.Steps);
+        Assert.Equal(PlanRisk.Critical, plan.Risk);
         Assert.Equal((-1, "C-01-01", "Avaria na embalagem"), (step.Quantity, step.From, step.Note));
     }
 
@@ -41,7 +43,7 @@ public class DemoNexusServiceTests
 
         var reply = await Ask(w, "avaria de 2 cx do ALI-300 em C-01-01 por caixa amassada");
 
-        Assert.Equal(-2, Assert.Single(reply.Plan!.Steps).Quantity);
+        Assert.Equal(-2, Assert.Single(w.Plans.FromDraft(reply.Draft!, DemoSessionService.Supervisor, 0).Steps).Quantity);
     }
 
     [Fact]
@@ -52,7 +54,7 @@ public class DemoNexusServiceTests
         var reply = await Ask(w, "ajuste -1 do ALI-300 em C-01-01");
 
         Assert.True(reply.IsError);
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
     }
 
     [Fact]
@@ -62,7 +64,7 @@ public class DemoNexusServiceTests
 
         var reply = await Ask(w, "qual o saldo do ABC-123?");
 
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
         Assert.Contains("40 cx em DOCA-01", reply.Text);
     }
 
@@ -84,7 +86,7 @@ public class DemoNexusServiceTests
 
         var reply = await Ask(w, "bom dia");
 
-        Assert.Null(reply.Plan);
+        Assert.Null(reply.Draft);
         Assert.False(reply.IsError);
         Assert.StartsWith("Não entendi", reply.Text);
     }

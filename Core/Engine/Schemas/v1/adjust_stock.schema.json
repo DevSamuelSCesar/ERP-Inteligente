@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "adjust_stock",
+  "description": "Ajusta o saldo por inventário ou avaria. Exige motivo; quantidade negativa baixa, positiva acrescenta.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sku", "qty", "location", "reason"],
+  "properties": {
+    "sku": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{3}-[0-9]{3}$", "maxLength": 7 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "SKU do produto (ABC-123) ou referência a um passo anterior." },
+    "qty": { "type": "integer", "minimum": -100000, "maximum": 100000, "not": { "const": 0 }, "description": "Diferença de saldo (não pode ser zero)." },
+    "location": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$", "maxLength": 10 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "Endereço do ajuste." },
+    "lot": { "type": "string", "minLength": 1, "maxLength": 30, "description": "Código do lote." },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Motivo do ajuste." }
+  }
+}

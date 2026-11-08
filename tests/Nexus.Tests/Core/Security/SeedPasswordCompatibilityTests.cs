@@ -8,9 +8,9 @@ namespace Nexus.Tests.Core.Security;
 /// </summary>
 public class SeedPasswordCompatibilityTests
 {
-    private const string DemoPassword = "nexus-demo-2026";
+    private const string DemoPassword = "demo";
     private const string SeedHashOfOperator =
-        "$argon2id$v=19$m=65536,t=3,p=4$4H3UK/Bmc+aoDlJBaqyenA$qVxvHSzAzpt4OnIntR3nD14T/SSD/TSRo8ARXm5bBeU";
+        "$argon2id$v=19$m=65536,t=3,p=4$nqN+GxHYJbAl3p4JDrtF0w$6vn3eeADPWe1PZ/tcMhn7vBpk9VMzBgNneefuOBzsBE";
 
     [Fact]
     public void Seed_hash_from_reference_implementation_verifies()
@@ -18,6 +18,6 @@ public class SeedPasswordCompatibilityTests
         var hasher = new PasswordHasher(Argon2Parameters.Default);
 
         Assert.True(hasher.Verify(DemoPassword, SeedHashOfOperator));
-        Assert.False(hasher.Verify("nexus-demo-2025", SeedHashOfOperator));
+        Assert.False(hasher.Verify("demo2", SeedHashOfOperator));
     }
 }

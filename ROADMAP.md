@@ -11,9 +11,13 @@ Solução C#, app Avalonia (MVVM) com login e sessão, SQLCipher com chaves no c
 *Por que junto:* login, permissões, conexões e auditoria são a base de segurança de tudo que vem depois.
 *Estado:* pronto. Código em `Core/`, telas lendo o banco real por `Services/Sqlite/`. O cofre do macOS (Keychain) ainda não é suportado.
 
-### 2. Motor determinístico de planos
+### 2. Motor determinístico de planos ✅
 DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (diff e risco), Approval (segregação de funções) e Executor transacional. Operações iniciais: `receive_goods`, `move_stock`, `create_product`, `create_location`. Operável sem LLM, por testes e por uma tela de pré-visualização do plano.
 *Por que junto:* Validator, Simulator, Approval e Executor formam um pipeline único e o catálogo de operações define os três.
+*Estado:* pronto.
+- Código em `Core/Engine`; tela "Novo plano"; aprovação e rejeição em Planos.
+- `adjust_stock` foi antecipado da feature 4, para a aprovação funcionar de ponta a ponta.
+- O banco ganhou a migração versionada 1 → 2 (`db/migrations/`).
 
 ## Camada de IA
 
@@ -22,7 +26,7 @@ DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (di
 *Por que junto:* o Planner só tem valor com as ferramentas de leitura e a tela de chat que o alimentam e exibem seu resultado.
 
 ### 4. Skills e catálogo completo de operações
-Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`, junto com as operações `reserve_stock`, `pick_items`, `ship_order` e `adjust_stock` (críticas, com aprovação).
+Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`, junto com as operações `reserve_stock`, `pick_items` e `ship_order` (`adjust_stock` já entrou na feature 2).
 *Por que junto:* cada skill depende das operações que ela permite.
 
 ### 5. Memória e RAG

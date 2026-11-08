@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "move_stock",
+  "description": "Transfere saldo entre dois endereços.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sku", "qty", "from", "to"],
+  "properties": {
+    "sku": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{3}-[0-9]{3}$", "maxLength": 7 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "SKU do produto (ABC-123) ou referência a um passo anterior." },
+    "qty": { "type": "integer", "minimum": 1, "maximum": 100000, "description": "Quantidade a mover." },
+    "from": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$", "maxLength": 10 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "Endereço de origem." },
+    "to": { "anyOf": [ { "type": "string", "pattern": "^[A-Z]{1,4}-[0-9]{2}(-[0-9]{2})?$", "maxLength": 10 }, { "type": "string", "pattern": "^\\$[a-z][a-z0-9_]{0,31}$", "maxLength": 33 } ], "description": "Endereço de destino." },
+    "lot": { "type": "string", "minLength": 1, "maxLength": 30, "description": "Código do lote." }
+  }
+}

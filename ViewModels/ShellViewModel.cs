@@ -31,6 +31,7 @@ public sealed partial class ShellViewModel : ViewModelBase
         NavigationItem[] menu =
         [
             new("Nexus", "Nexus", () => new NexusViewModel(_user, nexus, plans, dialogs, time), Permissions.PlanSubmit),
+            new("Novo plano", "NewPlan", () => new NewPlanViewModel(_user, plans, dialogs), Permissions.PlanSubmit),
             new("Estoque", "Stock", () => new StockViewModel(queries, time), Permissions.StockRead),
             new("Endereços", "Locations", () => new LocationsViewModel(queries), Permissions.StockRead),
             new("Pedidos", "Orders", () => new OrdersViewModel(queries), Permissions.StockRead),

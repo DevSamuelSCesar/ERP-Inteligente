@@ -16,6 +16,12 @@
     <EmbeddedResource Include="db\security.sql" LogicalName="Nexus.Db.security.sql" />
     <EmbeddedResource Include="db\seed.sql" LogicalName="Nexus.Db.seed.sql" />
     <EmbeddedResource Include="db\optimize.sql" LogicalName="Nexus.Db.optimize.sql" />
+    <EmbeddedResource Include="db\migrations\*.sql" LogicalName="Nexus.Db.migrations.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- DSL v1 JSON Schemas of the plan operations (Core/Engine); reused as LLM tool schemas in feature 3 -->
+  <ItemGroup>
+    <EmbeddedResource Include="Core\Engine\Schemas\v1\*.schema.json" LogicalName="Nexus.Dsl.v1.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- The test project lives under tests/ and must not be compiled into the app. -->
@@ -44,5 +50,6 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlcipher" Version="2.1.11" />
     <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <PackageReference Include="JsonSchema.Net" Version="9.6.0" />
   </ItemGroup>
 </Project>

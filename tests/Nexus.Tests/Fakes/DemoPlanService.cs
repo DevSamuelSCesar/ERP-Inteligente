@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using erp_inteligente.Models;
 using erp_inteligente.Services;
@@ -15,13 +16,63 @@ public sealed class DemoPlanService(DemoData data) : IPlanService
 {
     public IReadOnlyList<Plan> Plans => data.Plans;
 
+    /// <summary>Who submits drafts (the real service takes it from the session).</summary>
+    public UserSession Requester { get; set; } = DemoSessionService.Supervisor;
+
+    public Task<PlanPreview> PreviewAsync(PlanDraft draft)
+    {
+        var plan = FromDraft(draft, Requester, id: 0);
+        var error = Validate(plan);
+        IReadOnlyList<PlanIssue> issues = error is null ? [] : [new PlanIssue(null, error)];
+        return Task.FromResult(new PlanPreview(issues, plan.Steps, plan.Risk, null));
+    }
+
+    public async Task<Plan> SubmitAsync(PlanDraft draft)
+    {
+        var plan = FromDraft(draft, Requester, data.NextPlanId());
+        await SubmitPlanAsync(plan);
+        return plan;
+    }
+
+    /// <summary>DSL v1 draft for the move/adjust steps this fake understands.</summary>
+    public static PlanDraft ToDraft(string intent, string skill, IReadOnlyList<PlanStep> steps) =>
+        PlanDraft.Create(intent, skill, steps.Select(s => s.Operation switch
+        {
+            PlanOperation.AdjustStock => new PlanDraftStep("adjust_stock", new Dictionary<string, object?>
+                { ["sku"] = s.Sku, ["qty"] = s.Quantity, ["location"] = s.From, ["reason"] = s.Note }),
+            _ => new PlanDraftStep("move_stock", new Dictionary<string, object?>
+                { ["sku"] = s.Sku, ["qty"] = s.Quantity, ["from"] = s.From, ["to"] = s.To }),
+        }).ToList());
+
+    /// <summary>Reads the move/adjust steps of a draft back into a plan (units from the demo catalog).</summary>
+    public Plan FromDraft(PlanDraft draft, UserSession user, int id)
+    {
+        using var document = JsonDocument.Parse(draft.Json);
+        var root = document.RootElement;
+        var steps = new List<PlanStep>();
+        foreach (var step in root.GetProperty("steps").EnumerateArray())
+        {
+            var args = step.GetProperty("args");
+            string? Text(string name) => args.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            var sku = Text("sku")!;
+            var unit = data.FindProduct(sku)?.Unit ?? "un";
+            var qty = args.GetProperty("qty").GetInt32();
+            steps.Add(step.GetProperty("op").GetString() == "adjust_stock"
+                ? new PlanStep(PlanOperation.AdjustStock, qty, unit, sku, Text("location"), null, Text("reason"))
+                : new PlanStep(PlanOperation.MoveStock, qty, unit, sku, Text("from"), Text("to")));
+        }
+        var skill = root.TryGetProperty("skill", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString()! : "armazenagem";
+        return new Plan(id, skill, user.Username, user.DisplayName, data.Time.GetUtcNow(), steps);
+    }
+
     public bool IsEngineAvailable => true;
 
     public Task RefreshAsync() => Task.CompletedTask;
 
     public event EventHandler<Plan>? PlanChanged;
 
-    public Task SubmitAsync(Plan plan)
+    /// <summary>Submits an already-built plan (used by the fake's own tests).</summary>
+    public Task SubmitPlanAsync(Plan plan)
     {
         if (data.Plans.Any(p => p.Id == plan.Id))
             throw new InvalidOperationException($"Plan {plan.Id} was already submitted.");

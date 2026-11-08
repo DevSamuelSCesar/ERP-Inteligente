@@ -1,0 +1,134 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             xmlns:m="using:erp_inteligente.Models"
+             x:Class="erp_inteligente.Views.NewPlanView"
+             x:DataType="vm:NewPlanViewModel">
+
+    <!-- Novo plano: form on the left, steps, preview and result on the right (references/UI.md) -->
+    <Grid ColumnDefinitions="340,1,*">
+        <Rectangle Grid.Column="1" Classes="vrule" />
+
+        <!-- Operation form -->
+        <ScrollViewer Grid.Column="0" Padding="0,0,20,0">
+            <StackPanel Spacing="0">
+                <Rectangle Classes="rule" Margin="0,0,0,12" />
+                <TextBlock Classes="label" Text="Operação" Margin="0,0,0,4" />
+                <ComboBox ItemsSource="{Binding Operations}" SelectedItem="{Binding SelectedOperation}"
+                          HorizontalAlignment="Stretch" Margin="0,0,0,14" IsEnabled="{Binding CanPlan}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PlanOperationOption">
+                            <TextBlock Text="{Binding Label}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <ItemsControl ItemsSource="{Binding Fields}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PlanFieldViewModel">
+                            <StackPanel Margin="0,0,0,12">
+                                <TextBlock Classes="label" Text="{Binding Label}" Margin="0,0,0,4" IsVisible="{Binding IsText}" />
+                                <TextBox Text="{Binding Value}" PlaceholderText="{Binding Hint}" MaxLength="200"
+                                         IsVisible="{Binding IsText}" />
+                                <CheckBox Content="{Binding Label}" IsChecked="{Binding Checked}" IsVisible="{Binding IsFlag}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,12" IsVisible="{Binding HasFormError}">
+                    <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14"
+                              Margin="0,2,10,0" VerticalAlignment="Top" />
+                    <TextBlock Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" />
+                </Grid>
+
+                <Button Classes="neutral" HorizontalAlignment="Left" Command="{Binding AddStepCommand}"
+                        ToolTip.Tip="Adiciona o passo ao plano (Alt+D)">
+                    <AccessText Text="A_dicionar passo" />
+                </Button>
+                <TextBlock Classes="secondary" Margin="0,16,0,0" TextWrapping="Wrap" IsVisible="{Binding !CanPlan}"
+                           Text="Seu papel não permite montar planos." />
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Steps, preview and result -->
+        <ScrollViewer Grid.Column="2" Padding="20,0,0,0">
+            <StackPanel>
+                <Rectangle Classes="rule" />
+                <Grid ColumnDefinitions="40,150,*,40" Margin="0,8,0,4">
+                    <TextBlock Grid.Column="0" Classes="label" Text="Nº" />
+                    <TextBlock Grid.Column="1" Classes="label" Text="Operação" />
+                    <TextBlock Grid.Column="2" Classes="label" Text="Dados" />
+                </Grid>
+                <TextBlock Classes="secondary" Margin="0,4,0,8" IsVisible="{Binding !HasSteps}"
+                           Text="Nenhum passo ainda. Preencha a operação à esquerda e adicione o passo." />
+                <ItemsControl ItemsSource="{Binding Steps}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:DraftStepLine">
+                            <Grid ColumnDefinitions="40,150,*,40" MinHeight="30">
+                                <TextBlock Grid.Column="0" Classes="tabular" Text="{Binding Number}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding Operation}" VerticalAlignment="Center" FontWeight="Medium" />
+                                <TextBlock Grid.Column="2" Classes="tabular" Text="{Binding Description}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Description}" />
+                                <Button Grid.Column="3" Classes="neutral" BorderThickness="0" Padding="6" MinHeight="26"
+                                        Command="{Binding $parent[UserControl].((vm:NewPlanViewModel)DataContext).RemoveStepCommand}"
+                                        CommandParameter="{Binding}" ToolTip.Tip="Remover passo">
+                                    <PathIcon Data="{StaticResource Icon.Reject}" Width="10" Height="10" />
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Rectangle Classes="rule" Margin="0,4,0,12" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,14">
+                    <Button Classes="neutral" Command="{Binding PreviewCommand}" ToolTip.Tip="Valida e simula sem gravar (Alt+P)">
+                        <AccessText Text="_Pré-visualizar" />
+                    </Button>
+                    <Button Classes="primary" Command="{Binding SubmitCommand}" ToolTip.Tip="Envia o plano pré-visualizado (Alt+E)">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <AccessText Text="_Enviar plano" VerticalAlignment="Center" />
+                            <PathIcon Data="{StaticResource Icon.Send}" Width="14" Height="14" />
+                        </StackPanel>
+                    </Button>
+                    <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14"
+                              VerticalAlignment="Center" IsVisible="{Binding IsBusy}" />
+                </StackPanel>
+
+                <!-- Validation issues: one line per problem, icon + text -->
+                <ItemsControl ItemsSource="{Binding Issues}" Margin="0,0,0,10" IsVisible="{Binding HasIssues}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="m:PlanIssue">
+                            <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                                <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14"
+                                          Margin="0,2,10,0" VerticalAlignment="Top" />
+                                <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Simulated effect: nothing written yet -->
+                <Border Classes="board" HorizontalAlignment="Left" MinWidth="560" MaxWidth="900" Margin="0,0,0,16"
+                        IsVisible="{Binding HasPreview}">
+                    <StackPanel>
+                        <Rectangle Height="2" Fill="{DynamicResource StatusWarningBrush}" IsVisible="{Binding PreviewIsCritical}" />
+                        <Grid ColumnDefinitions="*,Auto" Margin="14,10">
+                            <TextBlock Classes="boardTitle" Text="Pré-visualização" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Classes="secondary" Text="nada foi gravado" VerticalAlignment="Center" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" Margin="14,0,14,10">
+                            <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Width="14" Height="14"
+                                      Margin="0,2,10,0" VerticalAlignment="Top" IsVisible="{Binding PreviewIsCritical}" />
+                            <TextBlock Grid.Column="1" Text="{Binding PreviewRiskText}" TextWrapping="Wrap" />
+                        </Grid>
+                        <ContentControl Content="{Binding PreviewEffect}" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Submitted plan -->
+                <ContentControl Content="{Binding Result}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

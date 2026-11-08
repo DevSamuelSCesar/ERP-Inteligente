@@ -19,6 +19,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Schema version 1 scripts (from git history) used to test the 1 → 2 migration -->
+  <ItemGroup>
+    <None Include="Core\Data\Fixtures\*.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\erp_inteligente.csproj" />
   </ItemGroup>

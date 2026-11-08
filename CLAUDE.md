@@ -16,8 +16,15 @@ O app C# (Avalonia, MVVM com CommunityToolkit.Mvvm) tem a interface completa e o
 - `Audit`: cadeia de hash v1.
 - `Auth`: login, bloqueio e sessão.
 - `Policy`: permissões e escopo por armazém.
+- `Engine`: motor de planos (feature 2).
+  - DSL v1 (`DslParser`) e JSON Schemas em `Core/Engine/Schemas/v1`.
+  - Regras por operação (`*Handler`), `PlanSimulator` (rollback), `PlanExecutor` e `PlanEngine` (máquina de estados).
 
-`AppHost` compõe o núcleo e `AppController` alterna entre login e shell. As telas leem o banco real por `Services/Sqlite/`, e o Nexus só consulta até existir o motor de planos (feature 2). Os antigos serviços de demonstração viraram *fakes* de teste em `tests/Nexus.Tests/Fakes/`. A senha de demonstração dos usuários do seed é `nexus-demo-2026`. Já existem os scripts SQLite em `db/` (aplicar na ordem `schema.sql` → `security.sql` → `seed.sql`; `volume.sql`, `benchmark.sql` e `optimize.sql` são da medição de desempenho) e os testes Python que os validam. `db/tests/test_db.py` também contém o *authorizer* de referência da conexão da IA, que o app C# deve reproduzir. Os dados do repositório são sempre fictícios.
+`AppHost` compõe o núcleo e `AppController` alterna entre login e shell. As telas leem o banco real por `Services/Sqlite/` (`EnginePlanService` liga a UI ao motor). Planos são montados na tela "Novo plano"; o Nexus só consulta até o Planner (feature 3).
+
+Mudanças de schema exigem uma migração em `db/migrations/NNN_*.sql`, além de `schema.sql`/`security.sql`:
+- registre a migração em `DatabaseBootstrapper.Migrations` e aumente `SchemaVersion`;
+- teste a migração sobre os scripts da versão anterior (`tests/Nexus.Tests/Core/Data/Fixtures`, extraídos do git). Os antigos serviços de demonstração viraram *fakes* de teste em `tests/Nexus.Tests/Fakes/`. A senha de demonstração dos usuários do seed é `demo`. Já existem os scripts SQLite em `db/` (aplicar na ordem `schema.sql` → `security.sql` → `seed.sql`; `volume.sql`, `benchmark.sql` e `optimize.sql` são da medição de desempenho) e os testes Python que os validam. `db/tests/test_db.py` também contém o *authorizer* de referência da conexão da IA, que o app C# deve reproduzir. Os dados do repositório são sempre fictícios.
 
 ## Comandos
 

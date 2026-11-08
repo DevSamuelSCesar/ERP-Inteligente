@@ -49,11 +49,11 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
             var reply = await nexus.SendAsync(request, user, new InlineProgress(s => StatusText = s));
             Entries.Add(new TranscriptEntryViewModel(time.GetUtcNow(), NexusAuthor, new TextBodyViewModel(reply.Text, reply.IsError)));
 
-            if (reply.Plan is { } plan)
+            if (reply.Draft is { } draft)
             {
+                StatusText = "Validando e simulando o plano";
+                var plan = await plans.SubmitAsync(draft);
                 Entries.Add(new TranscriptEntryViewModel(time.GetUtcNow(), NexusAuthor, new PlanBoardViewModel(plan, user, plans, dialogs)));
-                StatusText = "Simulando efeito";
-                await plans.SubmitAsync(plan);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

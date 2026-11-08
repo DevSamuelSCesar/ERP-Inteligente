@@ -26,16 +26,17 @@ erp_inteligente/
 │   ├── Data/         # NexusDatabase (3 conexões SQLCipher), AiAuthorizer, DatabaseBootstrapper (cria o banco a partir de db/*.sql)
 │   ├── Audit/        # AuditEntry, AuditHasher (regra v1), AuditLog (append encadeado), AuditVerifier
 │   ├── Auth/         # AuthService (login, bloqueio, auditoria), SessionService (expiração por inatividade), LoginResult
-│   └── Policy/       # PolicyEngine (deny-overrides, interseção IA ∩ usuário), ApplicationDb (consultas com permissão e $warehouse_id)
+│   ├── Policy/       # PolicyEngine (deny-overrides, interseção IA ∩ usuário), ApplicationDb (consultas com permissão e $warehouse_id)
+│   └── Engine/       # Motor de planos: DSL v1, catálogo, Schemas/v1 (JSON Schema), regras por operação, Simulator, Executor, PlanEngine
 ├── Models/           # Plano, passos, status, resumo de execução, sessão, permissões e linhas das consultas
 ├── Services/         # Interfaces da UI com o núcleo (planos, Nexus, consultas, sessão, diálogos) e ApprovalPolicy
-│   └── Sqlite/       # Implementações reais: consultas por armazém, planos somente leitura, Nexus só de consulta (conexão da IA)
-├── ViewModels/       # Login, shell e navegação, Nexus, quadro do plano, resumo visual, telas de consulta, Planos, diálogo
-├── Views/            # Login, erro fatal, janela principal, Nexus, quadro do plano, resumo, telas de consulta, diálogo de rejeição
+│   └── Sqlite/       # Implementações reais: consultas por armazém, planos pelo motor (EnginePlanService), Nexus só de consulta
+├── ViewModels/       # Login, shell e navegação, Nexus, Novo plano, quadro do plano, resumo visual, telas de consulta, Planos, diálogo
+├── Views/            # Login, erro fatal, janela principal, Nexus, Novo plano, quadro do plano, resumo, telas de consulta, diálogo de rejeição
 │   └── Converters/   # IconKeyConverter (chave de ícone → geometria)
 ├── tests/
 │   └── Nexus.Tests/  # xUnit v3 + Avalonia Headless (Skia real)
-│       ├── Core/     # Testes do núcleo por módulo + TestDatabase (banco SQLCipher temporário) e ManualTimeProvider
+│       ├── Core/     # Testes do núcleo por módulo (incl. Engine) + TestDatabase e ManualTimeProvider; Data/Fixtures: scripts da versão 1 do schema
 │       ├── Services/ # Testes dos serviços Sqlite (consultas, planos, Nexus, isolamento entre armazéns)
 │       ├── Fakes/    # Serviços em memória (antigos serviços de demonstração) para testar ViewModels do quadro de aprovação
 │       ├── TestApp.cs  # AppHost real sobre um TestDatabase, com login dos usuários do seed
@@ -45,10 +46,11 @@ erp_inteligente/
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho
 │   ├── schema.sql    # Tabelas (STRICT), FTS5 de memórias e conhecimento, auditoria
 │   ├── security.sql  # Triggers DENY (imutabilidade, anti-escalonamento), permissões efetivas, views v_ai_* e mascaradas
-│   ├── seed.sql      # Carga inicial fictícia: papéis, usuários (senha demo em Argon2id), armazém, estoque, planos, memórias, auditoria com hashes v1
+│   ├── seed.sql      # Carga inicial fictícia: papéis, usuários (senha demo "demo" em Argon2id), armazém, estoque, planos, memórias, auditoria com hashes v1
 │   ├── volume.sql    # Gera 1 milhão de movimentos sintéticos para o benchmark
 │   ├── benchmark.sql # As duas consultas lentas (kardex e FEFO) com EXPLAIN QUERY PLAN e tempo
 │   ├── optimize.sql  # Índices que resolvem as consultas lentas
+│   ├── migrations/   # Migrações versionadas aplicadas na abertura a bancos antigos (002: decisões de plano, senha demo)
 │   └── tests/
 │       └── test_db.py  # Testes: imutabilidade, escalonamento, authorizer da IA, SQL injection, otimização, cadeia de auditoria v1
 ├── tools/            # Utilitários do repositório

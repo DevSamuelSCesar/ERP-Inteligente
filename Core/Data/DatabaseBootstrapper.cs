@@ -10,7 +10,13 @@ namespace erp_inteligente.Core.Data;
 public static class DatabaseBootstrapper
 {
     /// <summary>Value of <c>PRAGMA user_version</c> of a completely initialised database.</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
+
+    /// <summary>Migration scripts (db/migrations) indexed by the version they upgrade FROM.</summary>
+    private static readonly (int From, string Script)[] Migrations =
+    [
+        (1, "migrations.002_plan_decisions.sql"),
+    ];
 
     private static readonly string[] Scripts = ["schema.sql", "security.sql", "seed.sql", "optimize.sql"];
 
@@ -86,6 +92,7 @@ public static class DatabaseBootstrapper
         try
         {
             if (isNew) CreateNew(full, keys);
+            else Migrate(full, keys);
             database = new NexusDatabase(full, keys); // takes ownership of keys
             using var probe = database.OpenApplication();
             return database;
@@ -97,6 +104,62 @@ public static class DatabaseBootstrapper
             if (isNew && !File.Exists(full)) keyManager.Forget(full);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Brings an existing database to <see cref="SchemaVersion"/>. Each migration and its version bump run in one
+    /// IMMEDIATE transaction, so a failure leaves the database at the previous version. Unknown (newer or
+    /// older-than-supported) versions are refused.
+    /// </summary>
+    internal static void Migrate(string path, DatabaseKeys keys)
+    {
+        NexusDatabase.EnsureInitialized();
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        try
+        {
+            connection.Open();
+            NexusDatabase.ApplyKey(connection, keys.SqlCipherKey);
+            var version = ReadUserVersion(connection);
+            while (version < SchemaVersion)
+            {
+                var step = Array.Find(Migrations, m => m.From == version);
+                if (step.Script is null)
+                    throw new DatabaseUnavailableException(
+                        "O banco de dados está incompleto ou tem uma versão de esquema desconhecida.");
+
+                using var transaction = connection.BeginTransaction(deferred: false);
+                using (var migrate = connection.CreateCommand())
+                {
+                    migrate.Transaction = transaction;
+                    migrate.CommandText = ReadScript(step.Script);
+                    migrate.ExecuteNonQuery();
+                }
+                using (var bump = connection.CreateCommand())
+                {
+                    bump.Transaction = transaction;
+                    bump.CommandText = $"PRAGMA user_version = {version + 1};"; // integer from code, no input
+                    bump.ExecuteNonQuery();
+                }
+                transaction.Commit();
+                version++;
+            }
+        }
+        catch (SqliteException ex)
+        {
+            throw new DatabaseUnavailableException("Não foi possível atualizar o banco de dados.", ex);
+        }
+    }
+
+    private static int ReadUserVersion(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt32(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string ReadScript(string name)

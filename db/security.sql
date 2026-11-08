@@ -68,6 +68,25 @@ WHEN new.approved_by IS NOT NULL AND new.approved_by = new.requested_by BEGIN
     SELECT RAISE(ABORT, 'DENY: a plan cannot be approved by its requester');
 END;
 
+-- The AI cannot reject plans either: rejecting is a human supervisor's decision.
+CREATE TRIGGER plans_deny_ai_rejection BEFORE UPDATE OF rejected_by ON plans
+WHEN new.rejected_by IS NOT NULL
+ AND (SELECT r.is_ai FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = new.rejected_by) = 1 BEGIN
+    SELECT RAISE(ABORT, 'DENY: the AI cannot reject plans');
+END;
+
+-- A requester cannot reject their own plan.
+CREATE TRIGGER plans_deny_self_rejection BEFORE UPDATE OF rejected_by ON plans
+WHEN new.rejected_by IS NOT NULL AND new.rejected_by = new.requested_by BEGIN
+    SELECT RAISE(ABORT, 'DENY: a plan cannot be rejected by its requester');
+END;
+
+-- A plan is either approved or rejected, never both.
+CREATE TRIGGER plans_deny_approve_and_reject BEFORE UPDATE ON plans
+WHEN new.approved_by IS NOT NULL AND new.rejected_by IS NOT NULL BEGIN
+    SELECT RAISE(ABORT, 'DENY: a plan cannot be both approved and rejected');
+END;
+
 -- ---------------------------------------------------------------------------
 -- Effective permissions (deny-overrides)
 -- ---------------------------------------------------------------------------
