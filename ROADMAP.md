@@ -30,7 +30,7 @@ DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (di
 - O plano da IA volta como proposta: só é gravado quando quem pediu confirma.
 - O motor aplica os direitos IA ∩ usuário a todo plano da IA.
 
-### 4. Skills
+### 4. Skills ✅
 Skills no formato dos agentes de IA (`SKILL.md` com frontmatter `nome`, `descricao`, `operacoes`), com índice no prompt e corpo carregado sob demanda (`load_skill`). Skills `recebimento`, `armazenagem`, `separacao`, `expedicao`, `inventario` e `cadastros`.
 *Por que junto:* cada skill depende das operações que ela permite.
 *Estado:* concluída em 2026-11-08.
@@ -40,7 +40,7 @@ Skills no formato dos agentes de IA (`SKILL.md` com frontmatter `nome`, `descric
 - A IA redige skills quando pedem (`propose_skill`), e só o Confirmar de quem pediu grava.
 - Desvio do plano original: as operações declaradas não filtram as ferramentas (ver `ARQUITETURA.md`, seção 9).
 
-### 5. Memória e RAG
+### 5. Memória e RAG ✅
 Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.
 *Por que junto:* os dois são recuperação de texto livre no mesmo contexto do Planner e compartilham índices e delimitação anti-injection.
 *Estado:* concluída em 2026-11-08, com BM25 apenas.
