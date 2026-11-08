@@ -26,11 +26,14 @@ AI_ROLE_ID = 5
 
 MIGRATION_003 = DB_DIR / "migrations" / "003_full_catalog.sql"
 MIGRATION_004 = DB_DIR / "migrations" / "004_reservations.sql"
+MIGRATION_005 = DB_DIR / "migrations" / "005_skills.sql"
 V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
+V4_SCRIPTS = ("schema_v4.sql", "security_v4.sql", "seed_v4.sql")
 # Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
 V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
 V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
-AI_DENY_PERMISSIONS = {"plan.approve", "sensitive.read", "user.manage", "role.manage", "audit.read", "recipe.manage"}
+AI_DENY_PERMISSIONS = {"plan.approve", "sensitive.read", "user.manage", "role.manage", "audit.read", "recipe.manage",
+                       "skill.manage"}
 
 # Base tables behind the v_ai_* views. SQLite reports a READ with an empty column name when a joined
 # table contributes no column (e.g. LEFT JOIN elimination); that exposes no data and is allowed only here.
@@ -428,7 +431,7 @@ class OptimizationTests(DatabaseTestCase):
 
 
 class MigrationTo3Tests(unittest.TestCase):
-    """A version 2 database upgraded by migrations/003 and 004 must match a fresh install (schema.sql + security.sql + seed.sql)."""
+    """A version 2 database upgraded by migrations/003, 004 and 005 must match a fresh install (schema.sql + security.sql + seed.sql)."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -440,6 +443,7 @@ class MigrationTo3Tests(unittest.TestCase):
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_003.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -588,7 +592,7 @@ class ReservationTests(unittest.TestCase):
 
 
 class MigrationTo4Tests(unittest.TestCase):
-    """A version 3 database upgraded by migrations/004 must match a fresh install."""
+    """A version 3 database upgraded by migrations/004 and 005 must match a fresh install."""
 
     def setUp(self):
         self.fresh = sqlite3.connect(":memory:")
@@ -597,6 +601,7 @@ class MigrationTo4Tests(unittest.TestCase):
         for name in V3_SCRIPTS:
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -630,6 +635,165 @@ class MigrationTo4Tests(unittest.TestCase):
 
     def test_audit_log_is_untouched(self):
         self.assertSameRows("SELECT id, hash FROM audit_log ORDER BY id")
+
+
+
+class MigrationTo5Tests(unittest.TestCase):
+    """A version 4 database upgraded by migrations/005 must match a fresh install, skill objects included."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        for name in V4_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+        for table in ("skills", "skill_versions"):
+            with self.subTest(table=table):
+                self.assertSameRows(
+                    f"SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table}') ORDER BY cid")
+
+    def test_skill_sql_matches_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, sql FROM sqlite_schema WHERE name IN ('skills', 'skill_versions', 'v_ai_skills', "
+            "'skills_deny_delete', 'skills_guard_update', 'skill_versions_deny_update', "
+            "'skill_versions_deny_delete', 'role_permissions_deny_ai_escalation') ORDER BY name")
+
+    def test_permissions_match_fresh_install(self):
+        self.assertSameRows("SELECT role_id, permission, effect FROM role_permissions ORDER BY 1, 2, 3")
+        self.assertSameRows("SELECT role_id, permission FROM v_effective_permissions ORDER BY 1, 2")
+
+    def test_existing_data_is_kept(self):
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM stock_balances").fetchone(), (13,))
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM skills").fetchone(), (0,))
+        self.assertEqual(self.migrated.execute("SELECT count(*) FROM order_reservations").fetchone(), (2,))
+
+
+class SkillTests(DatabaseTestCase):
+    """skills and skill_versions: archived not deleted, guarded updates, append-only history, AI read through v_ai_skills."""
+
+    DESCRIPTION = "Como conferir uma nota fiscal de recebimento antes de lançar a entrada no estoque."
+    BODY = "Conferir a nota contra o pedido e lançar somente as quantidades recebidas."
+
+    def add_skill(self, name="recebimento", status="active", version=1):
+        # created_by / updated_by = 2 (sup.maria, supervisor).
+        return self.conn.execute(
+            "INSERT INTO skills (name, description, operations_json, body, version, status, origin, "
+            "created_by, created_at, updated_by, updated_at) "
+            "VALUES (?, ?, '[\"receive_stock\"]', ?, ?, ?, 'user', 2, '2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')",
+            (name, self.DESCRIPTION, self.BODY, version, status)).lastrowid
+
+    def test_seed_has_no_skills(self):
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM skills").fetchone(), (0,))
+
+    def test_name_must_be_lowercase_snake_case_between_2_and_40(self):
+        for name in ("Recebimento", "a", "rec-1", "rec ebimento", "1recebimento", "x" * 41):
+            with self.subTest(name=name), self.assertRaises(sqlite3.IntegrityError):
+                self.add_skill(name=name)
+        self.add_skill(name="recebimento_cego")
+
+    def test_description_and_body_lengths_are_checked(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "INSERT INTO skills (name, description, operations_json, body, version, status, origin, created_by, "
+                "created_at, updated_by, updated_at) VALUES ('curta', 'curta', '[]', 'x', 1, 'active', 'user', 2, "
+                "'2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "INSERT INTO skills (name, description, operations_json, body, version, status, origin, created_by, "
+                "created_at, updated_by, updated_at) VALUES ('vazia', ?, '[]', '', 1, 'active', 'user', 2, "
+                "'2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')", (self.DESCRIPTION,))
+
+    def test_operations_must_be_a_json_array(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(
+                "INSERT INTO skills (name, description, operations_json, body, version, status, origin, created_by, "
+                "created_at, updated_by, updated_at) VALUES ('objeto', ?, '{\"a\": 1}', 'x', 1, 'active', 'user', 2, "
+                "'2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')", (self.DESCRIPTION,))
+
+    def test_skills_are_archived_never_deleted(self):
+        sid = self.add_skill()
+        self.assertDenied("DELETE FROM skills WHERE id = ?", (sid,))
+
+    def test_identity_and_creation_are_fixed(self):
+        sid = self.add_skill()
+        for sql in ("UPDATE skills SET name = 'outro' WHERE id = ?",
+                    "UPDATE skills SET created_by = 1 WHERE id = ?",
+                    "UPDATE skills SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?"):
+            with self.subTest(sql=sql):
+                self.assertDenied(sql, (sid,))
+
+    def test_version_never_goes_down(self):
+        sid = self.add_skill(version=3)
+        self.assertDenied("UPDATE skills SET version = 2 WHERE id = ?", (sid,))
+        self.conn.execute("UPDATE skills SET version = 4 WHERE id = ?", (sid,))
+        self.assertEqual(self.conn.execute("SELECT version FROM skills WHERE id = ?", (sid,)).fetchone(), (4,))
+
+    def test_content_and_status_may_change(self):
+        sid = self.add_skill()
+        self.conn.execute(
+            "UPDATE skills SET body = ?, status = 'archived', updated_by = 2, updated_at = '2026-11-09T09:00:00Z' "
+            "WHERE id = ?", ("Texto revisado.", sid))
+        self.assertEqual(self.conn.execute("SELECT status, body FROM skills WHERE id = ?", (sid,)).fetchone(),
+                         ("archived", "Texto revisado."))
+
+    def test_skill_versions_are_append_only(self):
+        sid = self.add_skill()
+        vid = self.conn.execute(
+            "INSERT INTO skill_versions (skill_id, version, description, operations_json, body, origin, saved_by, saved_at) "
+            "VALUES (?, 1, ?, '[]', ?, 'user', 2, '2026-11-08T10:00:00Z')", (sid, self.DESCRIPTION, self.BODY)).lastrowid
+        self.assertDenied("UPDATE skill_versions SET body = 'alterado' WHERE id = ?", (vid,))
+        self.assertDenied("DELETE FROM skill_versions WHERE id = ?", (vid,))
+
+    def test_skill_version_numbers_are_unique_per_skill(self):
+        sid = self.add_skill()
+        insert = ("INSERT INTO skill_versions (skill_id, version, description, operations_json, body, origin, saved_by, saved_at) "
+                  "VALUES (?, 1, ?, '[]', ?, 'user', 2, '2026-11-08T10:00:00Z')")
+        self.conn.execute(insert, (sid, self.DESCRIPTION, self.BODY))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute(insert, (sid, self.DESCRIPTION, self.BODY))
+
+    def test_only_the_supervisor_holds_skill_manage(self):
+        self.assertEqual(self.conn.execute(
+            "SELECT role_id FROM v_effective_permissions WHERE permission = 'skill.manage' ORDER BY role_id").fetchall(),
+            [(2,)])
+        for role_id in (1, 3, 4, 5):
+            self.assertFalse(is_allowed(self.conn, role_id, "skill.manage"), role_id)
+
+    def test_ai_role_cannot_be_granted_skill_manage(self):
+        self.assertDenied(
+            "INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, 'skill.manage', 'ALLOW')",
+            (AI_ROLE_ID,))
+
+    def test_ai_reads_only_active_skills_through_the_view(self):
+        self.add_skill(name="recebimento", status="active")
+        self.add_skill(name="antigo", status="archived")
+        self.conn.commit()
+        ai = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        self.addCleanup(ai.close)
+        ai.set_authorizer(ai_authorizer)
+
+        self.assertEqual(ai.execute("SELECT name, version, operations_json FROM v_ai_skills").fetchall(),
+                         [("recebimento", 1, '["receive_stock"]')])
+        self.assertEqual({r[1] for r in self.conn.execute("PRAGMA table_info(v_ai_skills)")},
+                         {"name", "description", "operations_json", "body", "version"})
+        for sql in ("SELECT name FROM skills",
+                    "SELECT status FROM skills",
+                    "SELECT count(*) FROM skills",
+                    "SELECT count(*) FROM skill_versions",
+                    "SELECT body FROM skill_versions"):
+            with self.subTest(sql=sql), self.assertRaises(sqlite3.DatabaseError):
+                ai.execute(sql).fetchall()
 
 
 if __name__ == "__main__":

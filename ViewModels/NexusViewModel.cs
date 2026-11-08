@@ -17,8 +17,9 @@ namespace erp_inteligente.ViewModels;
 /// Planner waits for the requester's Confirmar / Descartar; the request field stays disabled meanwhile.
 /// </summary>
 /// <param name="productNames">Catalog names highlighted in the answers; read again after every request.</param>
+/// <param name="skills">Saves a skill drafted by the Nexus when the requester confirms it; null hides such drafts.</param>
 public sealed partial class NexusViewModel(UserSession user, INexusService nexus, IPlanService plans, IDialogService dialogs, TimeProvider time,
-    Func<Task<IReadOnlyList<string>>>? productNames = null)
+    Func<Task<IReadOnlyList<string>>>? productNames = null, ISkillService? skills = null)
     : PageViewModel
 {
     public const string NexusAuthor = "Nexus";
@@ -47,13 +48,19 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
     [NotifyPropertyChangedFor(nameof(IsInputEnabled))]
     public partial DraftPlanViewModel? PendingProposal { get; private set; }
 
+    /// <summary>A skill drafted by the Planner still waiting for the requester, if any.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SendCommand))]
+    [NotifyPropertyChangedFor(nameof(IsInputEnabled))]
+    public partial SkillProposalViewModel? PendingSkill { get; private set; }
+
     private readonly List<DraftPlanViewModel> _pending = [];
     private readonly List<OptionsViewModel> _optionRows = [];
 
     [ObservableProperty]
     public partial string StatusText { get; private set; } = "";
 
-    public bool IsInputEnabled => !IsBusy && PendingProposal is null;
+    public bool IsInputEnabled => !IsBusy && PendingProposal is null && PendingSkill is null;
 
     private bool CanSend() => IsInputEnabled && !string.IsNullOrWhiteSpace(Draft);
 
@@ -80,6 +87,8 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
                 : reply.Draft is { } draft ? [new NexusProposal("", "", [], draft, reply.Preview)] : [];
             if (proposals.Count > 0)
                 await ProposeAsync(proposals);
+            if (reply.Skill is { } skill && skills is not null)
+                ProposeSkill(skill);
 
             if (reply.Options is { Count: > 0 } options)
             {
@@ -176,6 +185,20 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
             Say(card);
         }
         PendingProposal = _pending.FirstOrDefault();
+    }
+
+    /// <summary>Shows a drafted skill; like a plan, nothing is saved before the requester confirms it.</summary>
+    private void ProposeSkill(NexusSkillProposal proposal)
+    {
+        var card = new SkillProposalViewModel(proposal, skills!, _productNames);
+        card.Decided += (_, _) =>
+        {
+            if (ReferenceEquals(PendingSkill, card))
+                PendingSkill = null;
+            RefreshOptions();
+        };
+        PendingSkill = card;
+        Say(card);
     }
 
     /// <summary>An option button behaves like typing its request and pressing Enter.</summary>

@@ -8,6 +8,7 @@ using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Planner;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Core.Security;
+using erp_inteligente.Core.Skills;
 using erp_inteligente.Services;
 using erp_inteligente.Services.Sqlite;
 using erp_inteligente.ViewModels;
@@ -38,7 +39,8 @@ public sealed class AppHost : IDisposable
         Llm = llm ?? deepSeek!;
         LlmSettingsService = new LlmSettingsService(LlmSettings, Policy, AuditLog,
             ct => deepSeek?.TestConnectionAsync(ct) ?? Task.CompletedTask);
-        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine);
+        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: new SkillCatalog(database));
+        SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
     }
 
@@ -54,6 +56,7 @@ public sealed class AppHost : IDisposable
     public ILlmProvider Llm { get; }
     public LlmSettingsService LlmSettingsService { get; }
     public Planner Planner { get; }
+    public SkillStore SkillStore { get; }
 
     /// <summary>Last verification of the audit hash chain (at startup and at every login).</summary>
     public AuditVerification AuditStatus { get; private set; }
@@ -80,7 +83,8 @@ public sealed class AppHost : IDisposable
             Time,
             AuditStatus,
             $"{Database.Path} (criptografado com SQLCipher)",
-            LlmSettingsService);
+            LlmSettingsService,
+            new SqliteSkillService(SkillStore, Session));
 
     public void Dispose() => Database.Dispose();
 }

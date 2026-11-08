@@ -72,6 +72,39 @@ public class AiConnectionTests : IDisposable
     [InlineData("SELECT * FROM audit_log")]
     public void BaseAndSensitiveReads_AreDenied(string sql) => AssertDenied(sql);
 
+    [Fact]
+    public void ReadsOnlyActiveSkillsThroughTheSkillView()
+    {
+        using (var rw = _t.Database.OpenApplication())
+        {
+            foreach (var (name, status) in new[] { ("recebimento", "active"), ("antigo", "archived") })
+            {
+                using var cmd = rw.CreateCommand();
+                cmd.CommandText = "INSERT INTO skills (name, description, operations_json, body, version, status, origin, " +
+                                  "created_by, created_at, updated_by, updated_at) VALUES ($name, " +
+                                  "'Como conferir uma nota fiscal de recebimento antes de lançar.', '[]', 'Conferir a nota.', " +
+                                  "1, $status, 'user', 2, '2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')";
+                cmd.Parameters.AddWithValue("$name", name);
+                cmd.Parameters.AddWithValue("$status", status);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        using var read = _ai.CreateCommand();
+        read.CommandText = "SELECT name, version FROM v_ai_skills";
+        using var r = read.ExecuteReader();
+        Assert.True(r.Read());
+        Assert.Equal("recebimento", r.GetString(0));
+        Assert.False(r.Read());
+    }
+
+    [Theory]
+    [InlineData("SELECT name FROM skills")]
+    [InlineData("SELECT count(*) FROM skills")]
+    [InlineData("SELECT body FROM skill_versions")]
+    [InlineData("SELECT count(*) FROM skill_versions")]
+    public void SkillTables_AreDenied(string sql) => AssertDenied(sql);
+
     [Theory]
     [InlineData("INSERT INTO memories (scope, scope_ref, content) VALUES ('x','y','z')")]
     [InlineData("UPDATE stock_balances SET quantity = 0")]

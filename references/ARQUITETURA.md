@@ -22,8 +22,8 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 | P1 | Pouca intervenção manual do operador | O LLM planeja de ponta a ponta. O humano confirma cada proposta; planos de risco crítico exigem um supervisor diferente de quem pediu. |
 | P2 | Pouca necessidade de conhecimento técnico | O operador conversa em linguagem natural e vê uma pré-visualização do plano em termos do negócio. |
 | P3 | Automação confiável via tool calling | Ferramentas tipadas para leitura; escrita só por planos validados e transacionais. |
-| P4 | Sistema de skills do ERP | Os procedimentos do armazém ficam em skills (Markdown + JSON) carregadas sob demanda. |
-| P5 | Eficiência de tokens | Contexto mínimo por tarefa, ferramentas filtradas pela skill e **receitas** que rodam sem LLM. |
+| P4 | Sistema de skills do ERP | Os procedimentos do armazém ficam em skills (`SKILL.md` com frontmatter, como nos agentes de código) carregadas sob demanda. |
+| P5 | Eficiência de tokens | Contexto mínimo por tarefa: só o índice das skills no prompt, o corpo quando a IA o pede, e **receitas** que rodam sem LLM. |
 | P6 | RAG quando houver vantagem | Só sobre texto livre: memórias, skills e receitas. Dados estruturados são lidos por consultas tipadas. |
 | P7 | Melhoria contínua | Memórias e receitas são gravadas em SQLite e consultadas nas próximas tarefas. |
 
@@ -71,7 +71,7 @@ Assim, a consistência dos dados é garantida pelo código (validação + transa
 1. **Pedido:** o operador escreve, por exemplo, "Guarde as 40 caixas do ABC-123 que estão na doca".
 2. **Receita:** o Recipe Matcher procura uma receita compatível (seção 7). Se encontrar, pula para o passo 6 com o plano gerado a partir dela.
 3. **Skill:** o Planner escolhe a skill pelo índice (nome + descrição) e só então carrega o `SKILL.md` completo.
-4. **Contexto:** entram no contexto as memórias relevantes (top-k pequeno, filtrado por escopo) e as ferramentas de leitura permitidas pela skill.
+4. **Contexto:** entram no contexto as memórias relevantes (top-k pequeno, filtrado por escopo) e as ferramentas de leitura do direito efetivo.
 5. **Planejamento:** o LLM consulta o estado com ferramentas de leitura e chama `propose_plan`, com título, justificativa, suposições e o plano.
 6. **Validação:** se o plano for inválido, o erro volta ao LLM em formato estruturado para ser corrigido, com limite de tentativas. Ao atingir o limite, a tarefa é escalada ao operador.
 7. **Simulação:** o dry-run calcula o efeito (o que entra, o que sai e o que muda de endereço) e o nível de risco do plano.
@@ -177,11 +177,12 @@ O risco do plano é o **maior risco** entre seus passos.
 | Consultas de domínio (`get_stock`, `search_locations`, `search_orders`, `search_partners`...) | Leitura | Respostas compactas e paginadas |
 | `search_memories` | Leitura | Busca memórias além das já injetadas no contexto |
 | `search_recipes` | Leitura | Busca receitas similares para usar como base |
-| `load_skill` | Leitura | Carrega o `SKILL.md` de uma skill |
+| `load_skill` | Leitura | Carrega o corpo de uma skill do índice |
+| `propose_skill` | Rascunho (só quem tem `skill.manage`) | Propõe uma skill nova ou uma nova versão; nada é gravado até o supervisor confirmar |
 | `propose_plan` | Escrita (via motor, só simula) | Única porta de entrada para alterar dados; nada é gravado antes da confirmação de quem pediu |
 | `remember` | Memória | Registra uma memória candidata (seção 8) |
 
-A skill ativa define quais consultas e quais operações do catálogo ficam disponíveis.
+As operações oferecidas vêm do direito efetivo (IA ∩ usuário), não da skill: as operações que uma skill declara servem de índice e de validação dos exemplos (seção 9).
 
 **Implementado na feature 3 (`Core/Planner`), redesenhado em 2026-11-08 para o modo proativo:**
 - **Ferramentas de leitura (8):** `search_products`, `get_product`, `get_stock`, `search_locations`, `search_zones`, `search_lots`, `search_orders` e `search_partners`.
@@ -189,6 +190,7 @@ A skill ativa define quais consultas e quais operações do catálogo ficam disp
   - Rodam na conexão de leitura da IA (`v_ai_*`), sempre filtradas pelo armazém da sessão.
   - Devolvem no máximo 50 linhas e 8 KB.
   - Exigem `stock.read`.
+- **Skills (feature 4):** o prompt traz só o índice (`nome: descrição (operações)`, filtrado pelos direitos IA ∩ usuário); `load_skill` (até 3 por pedido, exige `stock.read`) devolve o corpo como instrução em `<skill>`, nunca dentro de `<dados>`, com `<` e `>` escapados. O campo `skill` do plano é preenchido pelo motor (skill carregada que cobre a 1ª operação, senão `SkillMapping`). `propose_skill` só é oferecida a quem tem `skill.manage` (o papel da IA não tem): a IA só rascunha e o humano grava ao confirmar.
 - **Propostas:** `propose_plan` recebe título, justificativa, suposições e o plano DSL v1.
   - Só existe se o direito efetivo tiver `plan.submit`; as operações oferecidas no prompt e no schema são as do direito IA ∩ usuário.
   - Um plano inválido volta como `[{step, field, code, message}]` e conta como tentativa.
@@ -268,16 +270,28 @@ Os trechos recuperados entram no prompt **delimitados como dados de referência*
 
 ## 9. Skills
 
+O formato é o dos agentes de IA (Claude Code, Codex): um `SKILL.md` com frontmatter e corpo em Markdown, em português.
+
 ```
-skills/
-└── armazenagem/
-    ├── SKILL.md     # Instruções padrão: passos, regras do negócio, exemplos curtos de planos
-    └── skill.json   # Nome, descrição, gatilhos, consultas e operações permitidas, versão
+---
+nome: recebimento                                  # ^[a-z][a-z_]{1,39}$, igual ao campo skill da DSL
+descricao: Use quando mercadoria chegar na doca... # 20 a 300 caracteres: é o que a IA lê para decidir
+operacoes: [create_inbound_order, receive_goods, cancel_inbound_order]
+---
+# Recebimento
+## Passos / ## Regras / ## Padrões quando faltar informação
+## Exemplo de plano  (bloco ```json validado pelo DslParser)
 ```
 
-- O prompt de sistema leva só o índice das skills. O conteúdo completo entra apenas quando a skill é ativada.
-- O `SKILL.md` traz exemplos de planos válidos, o que reduz tentativas de correção.
-- Skills iniciais: `recebimento`, `armazenagem`, `separacao`, `expedicao`, `inventario`, `cadastros`.
+- **Onde ficam:**
+  - As 6 skills iniciais (`recebimento`, `armazenagem`, `separacao`, `expedicao`, `inventario`, `cadastros`) vêm embutidas no app (`skills/*/SKILL.md`) e não são editáveis.
+  - As skills criadas ficam no banco cifrado (`skills`, migração 005), com o histórico só de inserção em `skill_versions`, e são auditadas (`skill.create`, `skill.update`, `skill.archive`, `skill.reactivate`).
+  - Uma skill do banco com o nome de uma embutida a substitui ("Personalizar"); arquivá-la devolve a embutida.
+- **Validação (`Core/Skills/SkillDocument`):** parser próprio e estrito (só as três chaves), normalização de caracteres de controle e de formatação, corpo de até 12.000 caracteres. Cada exemplo `json` passa pelo `DslParser` e só pode usar operações declaradas. A mesma validação vale para a tela, para o banco e para a IA.
+- **Sob demanda:** o prompt de sistema leva só o índice (`nome: descrição (operações)`), filtrado pelo direito efetivo (no máximo 40 entradas). A IA chama `load_skill` (até 3 por pedido) e só então o corpo entra no contexto, entre `<skill nome versao>`, com `<` e `>` escapados. A IA lê skills do banco só pela view `v_ai_skills` (ativas, sem autor).
+- **Operações declaradas não restringem:** divergência consciente da versão anterior desta seção (que previa um `skill.json` com operações permitidas). Restringir pela skill fazia a IA recusar mais; a segurança fica no motor (IA ∩ usuário).
+- **Criação pela IA:** quando pedem, a IA redige com `propose_skill` (só oferecida a quem tem `skill.manage`). O Nexus mostra o texto completo e só grava quando quem pediu clica em Confirmar, com os direitos dessa pessoa e origem `ai`. O papel da IA tem `DENY` em `skill.manage` e um trigger impede concedê-lo: a IA nunca grava as próprias instruções.
+- **Versão:** começa em 1 e sobe a cada edição; o plano guarda o nome da skill e as receitas (feature 7) guardam a versão.
 
 ---
 
@@ -438,7 +452,7 @@ No policy engine (`Core/Policy`):
 Camadas, da mais externa para a mais interna:
 
 1. **Conteúdo é dado, não instrução:** descrições de produtos, documentos do RAG, memórias e resultados de ferramentas entram no prompt dentro de blocos delimitados e marcados como dados de referência. O prompt de sistema diz explicitamente que instruções dentro desses blocos devem ser ignoradas e relatadas.
-2. **Ferramentas limitadas pela skill:** a IA só vê as ferramentas da skill ativa.
+2. **Skills não ampliam direitos:** uma skill é instrução aprovada pelo supervisor, mas as operações e ferramentas oferecidas vêm só do direito efetivo (IA ∩ usuário), e o prompt manda as regras do sistema prevalecerem sobre a skill. Só uma pessoa com `skill.manage` grava uma skill, depois de ver o texto inteiro.
 3. **Sem SQL e sem escrita direta:** a única forma de alterar dados é `propose_plan`, com operações de um catálogo fechado, executadas só depois da confirmação de quem pediu.
 4. **Validação determinística:** schema, regras de negócio e permissões (interseção IA ∩ usuário) são checados pelo código.
 5. **Aprovação humana** para todo plano de risco crítico, com o diff simulado em linguagem de negócio.

@@ -26,27 +26,27 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (1, 'memory.write', 'ALLOW'), (1, 'order.manage', 'ALLOW'),
     (1, 'stock.adjust', 'DENY'), (1, 'stock.ship', 'DENY'), (1, 'plan.approve', 'DENY'),
     (1, 'sensitive.read', 'DENY'), (1, 'user.manage', 'DENY'), (1, 'role.manage', 'DENY'),
-    (1, 'audit.read', 'DENY'),
+    (1, 'audit.read', 'DENY'), (1, 'skill.manage', 'DENY'),
     -- supervisor
     (2, 'stock.read', 'ALLOW'), (2, 'stock.receive', 'ALLOW'), (2, 'stock.move', 'ALLOW'),
     (2, 'stock.reserve', 'ALLOW'), (2, 'stock.pick', 'ALLOW'), (2, 'stock.ship', 'ALLOW'),
     (2, 'stock.adjust', 'ALLOW'), (2, 'plan.submit', 'ALLOW'), (2, 'plan.approve', 'ALLOW'),
     (2, 'catalog.manage', 'ALLOW'), (2, 'location.manage', 'ALLOW'), (2, 'sensitive.read', 'ALLOW'),
     (2, 'memory.write', 'ALLOW'), (2, 'recipe.manage', 'ALLOW'), (2, 'audit.read', 'ALLOW'),
-    (2, 'order.manage', 'ALLOW'),
+    (2, 'order.manage', 'ALLOW'), (2, 'skill.manage', 'ALLOW'),
     (2, 'user.manage', 'DENY'), (2, 'role.manage', 'DENY'),
     -- administrador
     (3, 'stock.read', 'ALLOW'), (3, 'user.manage', 'ALLOW'), (3, 'role.manage', 'ALLOW'),
     (3, 'catalog.manage', 'ALLOW'), (3, 'location.manage', 'ALLOW'), (3, 'sensitive.read', 'ALLOW'),
     (3, 'audit.read', 'ALLOW'),
     (3, 'plan.approve', 'DENY'), (3, 'stock.adjust', 'DENY'), (3, 'stock.ship', 'DENY'),
-    (3, 'stock.receive', 'DENY'), (3, 'stock.move', 'DENY'),
+    (3, 'stock.receive', 'DENY'), (3, 'stock.move', 'DENY'), (3, 'skill.manage', 'DENY'),
     -- auditor
     (4, 'stock.read', 'ALLOW'), (4, 'audit.read', 'ALLOW'),
     (4, 'plan.submit', 'DENY'), (4, 'plan.approve', 'DENY'), (4, 'stock.receive', 'DENY'),
     (4, 'stock.move', 'DENY'), (4, 'stock.adjust', 'DENY'), (4, 'stock.ship', 'DENY'),
     (4, 'sensitive.read', 'DENY'), (4, 'user.manage', 'DENY'), (4, 'role.manage', 'DENY'),
-    (4, 'memory.write', 'DENY'),
+    (4, 'memory.write', 'DENY'), (4, 'skill.manage', 'DENY'),
     -- agente_ia (effective rights = AI role ∩ requesting user's role; decision of 2026-11-08 in migrations/003)
     (5, 'stock.read', 'ALLOW'), (5, 'plan.submit', 'ALLOW'), (5, 'stock.receive', 'ALLOW'),
     (5, 'stock.move', 'ALLOW'), (5, 'stock.reserve', 'ALLOW'), (5, 'stock.pick', 'ALLOW'),
@@ -54,7 +54,7 @@ INSERT INTO role_permissions (role_id, permission, effect) VALUES
     (5, 'order.manage', 'ALLOW'), (5, 'catalog.manage', 'ALLOW'), (5, 'memory.write', 'ALLOW'),
     (5, 'plan.approve', 'DENY'),
     (5, 'sensitive.read', 'DENY'), (5, 'user.manage', 'DENY'), (5, 'role.manage', 'DENY'),
-    (5, 'audit.read', 'DENY'), (5, 'recipe.manage', 'DENY');
+    (5, 'audit.read', 'DENY'), (5, 'recipe.manage', 'DENY'), (5, 'skill.manage', 'DENY');
 
 -- ---------------------------------------------------------------------------
 -- Warehouse, users, structure

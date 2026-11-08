@@ -21,7 +21,7 @@ public sealed partial class ShellViewModel : ViewModelBase
     /// <param name="databaseDescription">Where the encrypted database lives, shown in Configurações.</param>
     public ShellViewModel(ISessionService session, IQueryService queries, IPlanService plans, INexusService nexus,
         IDialogService dialogs, TimeProvider time, AuditVerification auditStatus, string databaseDescription,
-        LlmSettingsService? llm = null)
+        LlmSettingsService? llm = null, ISkillService? skills = null)
     {
         _user = session.Current;
         _plans = plans;
@@ -32,7 +32,7 @@ public sealed partial class ShellViewModel : ViewModelBase
         NavigationItem[] menu =
         [
             new("Nexus", "Nexus", () => new NexusViewModel(_user, nexus, plans, dialogs, time,
-                async () => (await queries.GetProductsAsync()).Select(p => p.Name).ToList()), Permissions.PlanSubmit),
+                async () => (await queries.GetProductsAsync()).Select(p => p.Name).ToList(), skills), Permissions.PlanSubmit),
             new("Novo plano", "NewPlan", () => new NewPlanViewModel(_user, plans, dialogs, queries), Permissions.PlanSubmit),
             new("Estoque", "Stock", () => new StockViewModel(queries, time), Permissions.StockRead),
             new("Produtos", "Products", () => new ProductsViewModel(queries), Permissions.StockRead),
@@ -41,6 +41,7 @@ public sealed partial class ShellViewModel : ViewModelBase
             new("Pedidos", "Orders", () => new OrdersViewModel(queries), Permissions.StockRead),
             new("Parceiros", "Partners", () => new PartnersViewModel(queries), Permissions.StockRead),
             new("Planos", "Plans", () => new PlansViewModel(_user, plans, dialogs), Permissions.PlanSubmit, Permissions.PlanApprove, Permissions.AuditRead),
+            new("Skills", "Skills", () => new SkillsViewModel(_user, skills!), skills is null ? NoSuchPermission : Permissions.StockRead),
             new("Receitas", "Recipes", () => new RecipesViewModel(queries), Permissions.StockRead),
             new("Auditoria", "Audit", () => new AuditViewModel(queries), Permissions.AuditRead),
         ];
@@ -56,6 +57,9 @@ public sealed partial class ShellViewModel : ViewModelBase
         if (first is not null)
             _ = NavigateAsync(first);
     }
+
+    /// <summary>Hides an item whose service was not supplied (tests that build the shell without it).</summary>
+    private const string NoSuchPermission = "-";
 
     public ObservableCollection<NavigationItem> MenuItems { get; }
     public ObservableCollection<NavigationItem> FooterItems { get; }

@@ -16,6 +16,9 @@ public sealed record NexusProposal(string Title, string Rationale, IReadOnlyList
 /// <summary>A suggested next step; choosing it sends <see cref="Request"/> to the Nexus as if typed.</summary>
 public sealed record NexusOption(string Label, string Request);
 
+/// <summary>A skill drafted by the Nexus. It is saved only when a supervisor confirms it; <see cref="CurrentVersion"/> is set when the name already exists.</summary>
+public sealed record NexusSkillProposal(erp_inteligente.Core.Skills.SkillDocument Document, string Reason, int? CurrentVersion);
+
 /// <summary>
 /// Answer of the Nexus to a request: short plain text, up to three alternative proposals (or a single
 /// <see cref="Draft"/>) and suggested next steps. Proposals are only written after the requester confirms one.
@@ -28,7 +31,8 @@ public sealed record NexusReply(
     bool IsError = false,
     bool IsEscalated = false,
     IReadOnlyList<NexusProposal>? Proposals = null,
-    IReadOnlyList<NexusOption>? Options = null);
+    IReadOnlyList<NexusOption>? Options = null,
+    NexusSkillProposal? Skill = null);
 
 /// <summary>Turns a natural-language request into a reply or a plan (the Planner, seen from the UI).</summary>
 public interface INexusService

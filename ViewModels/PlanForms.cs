@@ -47,15 +47,7 @@ public static class PlanForms
     };
 
     /// <summary>The business skill a plan made of this operation belongs to (shown on the plan board).</summary>
-    public static string SkillOf(string op) => op switch
-    {
-        "receive_goods" or "create_inbound_order" or "cancel_inbound_order" => "recebimento",
-        "move_stock" => "armazenagem",
-        "adjust_stock" => "inventario",
-        "pick_items" => "separacao",
-        "create_outbound_order" or "cancel_outbound_order" or "reserve_stock" or "release_reservation" or "ship_order" => "expedicao",
-        _ => "cadastros",
-    };
+    public static string SkillOf(string op) => SkillMapping.ForOperation(op);
 
     public static IReadOnlyList<PlanOperationOption> Build(IEnumerable<OperationDefinition> operations) =>
         operations.Select(o => new PlanOperationOption(o.Name, o.Label, o.Permission, o.Name, SkillOf(o.Name),

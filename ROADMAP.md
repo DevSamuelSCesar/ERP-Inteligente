@@ -31,9 +31,14 @@ DSL JSON versionada, Validator (JSON Schema + regras de negócio), Simulator (di
 - O motor aplica os direitos IA ∩ usuário a todo plano da IA.
 
 ### 4. Skills
-Carregador de skills (`SKILL.md` + `skill.json`) com índice no prompt e ferramentas filtradas por skill. Skills `recebimento` e `armazenagem` primeiro; depois `separacao`, `expedicao`, `inventario` e `cadastros`.
+Skills no formato dos agentes de IA (`SKILL.md` com frontmatter `nome`, `descricao`, `operacoes`), com índice no prompt e corpo carregado sob demanda (`load_skill`). Skills `recebimento`, `armazenagem`, `separacao`, `expedicao`, `inventario` e `cadastros`.
 *Por que junto:* cada skill depende das operações que ela permite.
-*Estado:* parcial. O catálogo completo de operações já está pronto (20 operações, incluindo `reserve_stock`, `pick_items`, `ship_order` e os cancelamentos), antecipado para 2026-11-08. Falta o carregador de skills e as skills.
+*Estado:* concluída em 2026-11-08.
+- O catálogo completo de operações (20) foi antecipado.
+- As 6 skills vêm embutidas no app. Skills criadas ficam no banco, com versões e auditoria (migração 005).
+- A tela Skills é somente leitura, exceto para o supervisor (`skill.manage`), que cria, edita, personaliza uma embutida, arquiva e reativa.
+- A IA redige skills quando pedem (`propose_skill`), e só o Confirmar de quem pediu grava.
+- Desvio do plano original: as operações declaradas não filtram as ferramentas (ver `ARQUITETURA.md`, seção 9).
 
 ### 5. Memória e RAG
 Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.

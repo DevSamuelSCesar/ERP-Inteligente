@@ -17,6 +17,7 @@
     <StreamGeometry x:Key="Icon.Orders">F0 M2.5,1 H13.5 V15 H2.5 Z M5,4 H11 V5.5 H5 Z M5,7.25 H11 V8.75 H5 Z M5,10.5 H9 V12 H5 Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Plans">M1,1.5 H4.5 V5 H1 Z M6.5,2.5 H15 V4 H6.5 Z M1,6.25 H4.5 V9.75 H1 Z M6.5,7.25 H15 V8.75 H6.5 Z M1,11 H4.5 V14.5 H1 Z M6.5,12 H15 V13.5 H6.5 Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Recipes">M8,1 L15,4.5 L8,8 L1,4.5 Z M1,8 L2.75,7.1 L8,9.75 L13.25,7.1 L15,8 L8,11.5 Z M1,11.5 L2.75,10.6 L8,13.25 L13.25,10.6 L15,11.5 L8,15 Z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Skills">F0 M2.5,1 H13.5 V15 H2.5 Z M4,2.5 V13.5 H12 V2.5 Z M5.5,4.5 H10.5 V6 H5.5 Z M5.5,7.25 H10.5 V8.75 H5.5 Z M5.5,10 H8.5 V11.5 H5.5 Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Audit">F1 M6.5,1 A5.5,5.5 0 1 1 6.5,12 A5.5,5.5 0 1 1 6.5,1 Z M6.5,3 A3.5,3.5 0 1 0 6.5,10 A3.5,3.5 0 1 0 6.5,3 Z M11,10 L15.25,14.25 L14.25,15.25 L10,11 Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.Settings">M1,2.75 H15 V4.25 H1 Z M10,1 H12.5 V6 H10 Z M1,7.25 H15 V8.75 H1 Z M3.5,5.5 H6 V10.5 H3.5 Z M1,11.75 H15 V13.25 H1 Z M8,10 H10.5 V15 H8 Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.User">M8,1.5 A3,3 0 1 1 8,7.5 A3,3 0 1 1 8,1.5 Z M2,15 V12.5 C2,10.5 3.5,9 5.5,9 H10.5 C12.5,9 14,10.5 14,12.5 V15 Z</StreamGeometry>

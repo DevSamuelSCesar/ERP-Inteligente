@@ -38,6 +38,27 @@ WHEN new.id <> old.id OR new.warehouse_id <> old.warehouse_id OR new.outbound_or
     SELECT RAISE(ABORT, 'DENY: illegal reservation change');
 END;
 
+-- Skills are archived, never deleted.
+CREATE TRIGGER skills_deny_delete BEFORE DELETE ON skills BEGIN
+    SELECT RAISE(ABORT, 'DENY: skills are archived, never deleted');
+END;
+
+-- Identity and creation are fixed, and the version never goes down. Content, status and the updater may change.
+CREATE TRIGGER skills_guard_update BEFORE UPDATE ON skills
+WHEN new.id <> old.id OR new.name <> old.name OR new.created_by <> old.created_by OR new.created_at <> old.created_at
+  OR new.version < old.version BEGIN
+    SELECT RAISE(ABORT, 'DENY: illegal skill change');
+END;
+
+-- Version history is append-only.
+CREATE TRIGGER skill_versions_deny_update BEFORE UPDATE ON skill_versions BEGIN
+    SELECT RAISE(ABORT, 'DENY: skill_versions is append-only');
+END;
+
+CREATE TRIGGER skill_versions_deny_delete BEFORE DELETE ON skill_versions BEGIN
+    SELECT RAISE(ABORT, 'DENY: skill_versions is append-only');
+END;
+
 CREATE TRIGGER plans_deny_update_final BEFORE UPDATE ON plans
 WHEN old.status IN ('executed', 'failed', 'rejected') BEGIN
     SELECT RAISE(ABORT, 'DENY: finished plans are immutable');
@@ -53,11 +74,12 @@ END;
 
 -- Permissions the AI role can never receive, whoever runs the INSERT. stock.adjust and stock.ship are not
 -- here: since 2026-11-08 the AI has the operational rights of the user (migrations/003_full_catalog.sql).
+-- skill.manage is here: the AI never saves its own instructions (migrations/005_skills.sql).
 CREATE TRIGGER role_permissions_deny_ai_escalation BEFORE INSERT ON role_permissions
 WHEN new.effect = 'ALLOW'
  AND (SELECT is_ai FROM roles WHERE id = new.role_id) = 1
  AND new.permission IN ('plan.approve', 'user.manage', 'role.manage', 'sensitive.read',
-                        'audit.read') BEGIN
+                        'audit.read', 'skill.manage') BEGIN
     SELECT RAISE(ABORT, 'DENY: permission cannot be granted to the AI role');
 END;
 
@@ -181,6 +203,12 @@ CREATE VIEW v_ai_partners AS
 SELECT 'supplier' AS kind, id, name, is_active FROM suppliers
 UNION ALL
 SELECT 'customer', id, name, is_active FROM customers;
+
+-- Active skills only (archived ones and the version history stay out of the AI's reach).
+CREATE VIEW v_ai_skills AS
+SELECT name, description, operations_json, body, version
+FROM skills
+WHERE status = 'active';
 
 -- ---------------------------------------------------------------------------
 -- Masked views for human roles without sensitive.read

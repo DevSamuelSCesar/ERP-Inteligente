@@ -47,7 +47,7 @@ A janela tem duas regiões fixas:
 - A ordem é fixa:
   1. **Nexus**, primeiro e selecionado ao abrir o app.
   2. As telas de consulta: Estoque, Endereços, Pedidos.
-  3. Planos (histórico e aprovações pendentes), Receitas, Auditoria.
+  3. Planos (histórico e aprovações pendentes), Skills, Receitas, Auditoria.
   4. No rodapé, separados: o usuário logado, as configurações e o botão de sair.
 - Planos mostra um contador de aprovações pendentes quando o usuário pode aprovar.
 - A coluna não muda ao navegar. Só o container de conteúdo troca.
@@ -98,7 +98,7 @@ O Nexus é onde o operador interage com o sistema: pede em linguagem natural, ac
 - **Transcrição** no meio, em toda a largura, com rolagem e entradas em ordem cronológica. Cada entrada tem a hora e o autor (usuário ou Nexus) à esquerda e o conteúdo à direita. Não há balões, avatares nem alinhamento à direita para o usuário.
 - As respostas do Nexus são **curtas e em texto simples**. O que é estruturado vira controle nativo: quadro do plano (seção 5) e resumo visual (seção 6). Markdown nunca é renderizado.
 - A resposta aparece **completa** quando pronta, sem streaming caractere a caractere. Enquanto isso, a **linha de estado** da tarefa (abaixo da última entrada) mostra o que está acontecendo.
-- **Entrada** fixa no rodapé: campo de texto em toda a largura e o botão primário **Enviar**. Enter envia e Shift+Enter quebra a linha. O campo fica desabilitado enquanto uma proposta aguarda a decisão do próprio usuário.
+- **Entrada** fixa no rodapé: campo de texto em toda a largura e o botão primário **Enviar**. Enter envia e Shift+Enter quebra a linha. O campo fica desabilitado enquanto uma proposta (plano ou skill) aguarda a decisão do próprio usuário.
 - Durante uma tarefa, a linha de estado tem o botão **Cancelar** (Esc), que interrompe a chamada ao provedor; nada foi gravado nesse ponto.
 - O texto da transcrição pode ser selecionado e copiado (`SelectableTextBlock`).
 
@@ -186,6 +186,14 @@ O plano montado pela IA chega primeiro como **proposta**: o motor já o validou 
 - **Descartar** encerra a proposta só para leitura, com "Descartado. Nada foi gravado."
 - Configurar o provedor é feito em Configurações, seção "Provedor de LLM": só o administrador digita a chave (campo mascarado, nunca reexibida) e escolhe o modelo; os demais veem só se há chave.
 
+### 5.3 Skill proposta pelo Nexus
+
+Quando o supervisor pede ao Nexus para criar ou melhorar uma skill, a IA a redige e o chat mostra um quadro.
+- O título é "Skill proposta · nome" ou, se o nome já existe, "Nova versão de nome (substitui a vN)".
+- Abaixo vêm o motivo, "Quando usar" (a descrição), as operações declaradas (código, rótulo e risco) e as instruções completas, com rolagem.
+- O rodapé tem **✓ Confirmar** (Alt+C) e **Descartar** (Alt+D), como no plano. Confirmar grava a skill com os direitos de quem confirma e origem `ai`; Descartar não grava nada.
+- O campo de pedido fica travado até a decisão.
+
 ### 5.2 Novo plano (formulários gerados do catálogo)
 
 - Toda operação do catálogo tem formulário. Ele é gerado a partir do JSON Schema da operação (`ViewModels/PlanForms.cs`), então o que a IA pode propor o operador também faz à mão.
@@ -240,11 +248,30 @@ ABC-123  Caixa padrão       A-03-02    L2410    20
 ```
 
 - **Título**, depois **abas ou filtros**, depois a **faixa de totais** e, por fim, a **tabela (`DataGrid`) ou o gráfico** principal, em toda a largura.
+- **Skills** (seção 7.1) segue a mesma estrutura, com lista e detalhe lado a lado.
 - **Produtos** lista o catálogo inteiro, inclusive produtos recém-cadastrados ainda sem saldo, com o saldo no armazém do usuário. O custo unitário (dado sensível) nunca aparece nessa tela.
 - As telas de consulta são **somente leitura**. Qualquer alteração de dados passa pelo Nexus (plano) ou por uma receita disparada pela UI, que gera um plano validado da mesma forma (seção 7 de [`ARQUITETURA.md`](ARQUITETURA.md)).
 - As tabelas são `DataGrid` virtualizadas, com cabeçalho fixo, ordenação, colunas redimensionáveis, navegação por setas e linhas de ~28 px. Não há paginação de site nem "carregar mais". Os filtros vêm de listas fixas (seção 12.9 de [`ARQUITETURA.md`](ARQUITETURA.md)).
 
 ---
+
+### 7.1 Skills
+
+```
+Skills
+[ Ativas ][ Arquivadas ]  [ filtro ]                    [ Nova skill ]
+ⓘ Somente leitura: criar e editar skills é do supervisor.   (sem skill.manage)
+┌ Nome · Origem · Versão ┐│ armazenagem
+│ armazenagem  Embutida v1││ Versão 1 · Embutida
+│ devolucoes  Cadastrada v2││ Quando usar ...   Operações ...   Instruções ...
+└────────────────────────┘│ [Editar] [Personalizar] [Arquivar] [Reativar]
+```
+
+- **Lista:** nome, origem ("Embutida", "Personalizada", "Cadastrada" ou "Criada pela IA") e versão, em abas Ativas e Arquivadas, com filtro por nome ou descrição.
+- **Detalhe:** "Quando usar", as operações declaradas (código, rótulo e risco) e as instruções, selecionáveis.
+- **Ações (só `skill.manage`):** aparecem só as que se aplicam à skill selecionada. Embutidas não são editadas: "Personalizar" copia o texto para uma versão própria do armazém, e arquivar essa versão devolve a embutida.
+- **Editor:** nome (só na criação), "Quando usar", as 20 operações do catálogo como caixas de seleção, e as instruções em Markdown. A validação roda a cada mudança, com a mensagem embaixo do campo; Salvar (Ctrl+S) só habilita sem erros e grava uma nova versão; Cancelar (Esc) sai sem gravar.
+- O resultado de cada ação aparece numa linha com ícone e texto, nunca em toast.
 
 ## 8. Visibilidade
 
@@ -253,6 +280,7 @@ O que cada usuário vê depende das permissões efetivas (`v_effective_permissio
 | Elemento | Regra |
 |----------|-------|
 | Itens da coluna de menus | Só aparecem os itens cuja permissão o usuário tem (ex.: Auditoria exige `audit.read`; Receitas exige `recipe.manage` para editar) |
+| Tela Skills | Todos com `stock.read` leem; criar, editar, personalizar, arquivar e reativar exigem `skill.manage` (supervisor) |
 | Botões ✓ / ✗ do plano | Ativos só com `plan.approve` e quando o usuário não é o solicitante |
 | Contador de pendências em Planos | Só para quem pode aprovar |
 | Dados sensíveis (CPF, CNPJ completo, contato, custo unitário) | Mascarados para quem não tem `sensitive.read` |

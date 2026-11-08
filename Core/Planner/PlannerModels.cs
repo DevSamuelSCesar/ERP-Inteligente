@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using erp_inteligente.Core.Engine;
 using erp_inteligente.Core.Llm;
+using erp_inteligente.Core.Skills;
 using erp_inteligente.Models;
 
 namespace erp_inteligente.Core.Planner;
@@ -16,8 +17,18 @@ public sealed record PlannerAnswer(string Text) : PlannerResult
 {
     public IReadOnlyList<PlannerOption> Options { get; init; } = [];
 
-    public PlannerAnswer(string text, IReadOnlyList<PlannerOption> options) : this(text) => Options = options;
+    /// <summary>A skill drafted by the model for the supervisor to review; nothing is saved before they confirm.</summary>
+    public SkillProposal? Skill { get; init; }
+
+    public PlannerAnswer(string text, IReadOnlyList<PlannerOption> options, SkillProposal? skill = null) : this(text)
+    {
+        Options = options;
+        Skill = skill;
+    }
 }
+
+/// <summary>A valid skill draft (<see cref="SkillDocument.Validate"/> found no issue). <see cref="CurrentVersion"/> is set when the name already exists.</summary>
+public sealed record SkillProposal(SkillDocument Document, string Reason, int? CurrentVersion);
 
 /// <summary>One plan that passed the dry run (nothing was written), with the title, rationale and assumptions the model gave.</summary>
 public sealed record ProposalItem(string Title, string Rationale, IReadOnlyList<string> Assumptions, PlanDraft Draft, EnginePreview Preview);
@@ -26,7 +37,7 @@ public sealed record ProposalItem(string Title, string Rationale, IReadOnlyList<
 /// One to <see cref="PlannerOptions.MaxProposals"/> alternative plans that passed the dry run. <see cref="Text"/> is the model's
 /// short closing message and <see cref="Options"/> the suggested next steps.
 /// </summary>
-public sealed record PlannerProposals(IReadOnlyList<ProposalItem> Items, string? Text, IReadOnlyList<PlannerOption> Options) : PlannerResult;
+public sealed record PlannerProposals(IReadOnlyList<ProposalItem> Items, string? Text, IReadOnlyList<PlannerOption> Options, SkillProposal? Skill = null) : PlannerResult;
 
 /// <summary>A limit was reached (attempts, rounds or tokens). <see cref="Reason"/> is a Portuguese business message.</summary>
 public sealed record PlannerEscalated(string Reason) : PlannerResult;

@@ -6,9 +6,9 @@ using Microsoft.Data.Sqlite;
 namespace Nexus.Tests.Core.Data;
 
 /// <summary>
-/// Databases created by schema versions 1, 2 and 3 (scripts copied from git history into Fixtures/) are upgraded to the
+/// Databases created by schema versions 1 to 4 (scripts copied from git history into Fixtures/) are upgraded to the
 /// current version on open, keeping their data. Version 2 → 3 adds the catalog flags, the AI operational rights and
-/// the v_ai_* views (migrations/003_full_catalog.sql).
+/// the v_ai_* views (migrations/003_full_catalog.sql). Version 4 → 5 adds skills and v_ai_skills (migrations/005_skills.sql).
 /// </summary>
 public sealed class MigrationTests : IDisposable
 {
@@ -18,6 +18,7 @@ public sealed class MigrationTests : IDisposable
     private static readonly string[] Version1Scripts = ["schema_v1.sql", "security_v1.sql", "seed_v1.sql"];
     private static readonly string[] Version2Scripts = ["schema_v2.sql", "security_v2.sql", "seed_v2.sql"];
     private static readonly string[] Version3Scripts = ["schema_v3.sql", "security_v3.sql", "seed_v3.sql"];
+    private static readonly string[] Version4Scripts = ["schema_v4.sql", "security_v4.sql", "seed_v4.sql"];
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "nexus-tests-" + Guid.NewGuid().ToString("N"));
     private readonly InMemorySecretStore _store = new();
@@ -70,10 +71,29 @@ public sealed class MigrationTests : IDisposable
     private NexusDatabase Open(string? path = null) =>
         DatabaseBootstrapper.OpenOrCreate(path ?? _path, new KeyManager(_store));
 
+    /// <summary>Checks what the current schema (version 5) must have: migrations/005_skills.sql on top of the version 4 objects.</summary>
+    private static void AssertVersion5Schema(SqliteConnection c)
+    {
+        Assert.Equal(5L, Scalar(c, "PRAGMA user_version"));
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name IN ('skills', 'skill_versions')"));
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name IN " +
+            "('skills_deny_delete', 'skills_guard_update', 'skill_versions_deny_update', 'skill_versions_deny_delete')"));
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'view' AND name = 'v_ai_skills'"));
+        Assert.Equal("name,description,operations_json,body,version", ColumnList(c, "v_ai_skills"));
+        Assert.Equal(0L, Scalar(c, "SELECT count(*) FROM skills"));
+        // Supervisor (2) may manage skills; nobody else does, and the AI never does.
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM v_effective_permissions WHERE role_id = 2 AND permission = 'skill.manage'"));
+        Assert.Equal(0L, Scalar(c, "SELECT count(*) FROM v_effective_permissions WHERE permission = 'skill.manage' AND role_id <> 2"));
+        Assert.Equal(1L, Scalar(c,
+            "SELECT count(*) FROM role_permissions WHERE role_id = 5 AND effect = 'DENY' AND permission = 'skill.manage'"));
+        Assert.Equal(1L, Scalar(c,
+            "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name = 'role_permissions_deny_ai_escalation'"));
+        AssertVersion4Schema(c);
+    }
+
     /// <summary>Checks what migrations/004_reservations.sql must have produced (same as a fresh schema 4 database).</summary>
     private static void AssertVersion4Schema(SqliteConnection c)
     {
-        Assert.Equal(4L, Scalar(c, "PRAGMA user_version"));
         Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'order_reservations'"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name LIKE 'idx_order_reservations_%'"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name LIKE 'order_reservations_%'"));
@@ -120,31 +140,72 @@ public sealed class MigrationTests : IDisposable
         using var db = Open();
         using var c = db.OpenApplication();
 
-        AssertVersion4Schema(c);
+        AssertVersion5Schema(c);
     }
 
     [Fact]
-    public void Version_3_database_is_upgraded_to_4_with_the_reservation_backfill()
+    public void Version_3_database_is_upgraded_to_5_with_the_reservation_backfill()
     {
         var path = CreateLegacyDatabase("v3.db", 3, Version3Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion4Schema(c);
+        AssertVersion5Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_2_database_is_upgraded_to_4_and_keeps_its_data()
+    public void Version_2_database_is_upgraded_to_5_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v2.db", 2, Version2Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion4Schema(c);
+        AssertVersion5Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
+    }
+
+    [Fact]
+    public void Version_4_database_is_upgraded_to_5_and_keeps_its_data()
+    {
+        var path = CreateLegacyDatabase("v4.db", 4, Version4Scripts);
+        using var db = Open(path);
+        using var c = db.OpenApplication();
+
+        AssertVersion5Schema(c);
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
+        Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM order_reservations"));
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
+        Assert.True(AuditVerifier.Verify(c).IsValid);
+    }
+
+    [Fact]
+    public void Migrated_database_guards_skills_and_their_history()
+    {
+        using var db = Open(CreateLegacyDatabase("v4-skills.db", 4, Version4Scripts));
+        using var c = db.OpenApplication();
+
+        Exec(c, "INSERT INTO skills (name, description, operations_json, body, version, status, origin, created_by, " +
+                "created_at, updated_by, updated_at) VALUES ('recebimento', 'Como conferir uma nota fiscal de recebimento.', " +
+                "'[\"receive_stock\"]', 'Conferir a nota antes de lançar.', 2, 'active', 'user', 2, " +
+                "'2026-11-08T10:00:00Z', 2, '2026-11-08T10:00:00Z')");
+        Exec(c, "INSERT INTO skill_versions (skill_id, version, description, operations_json, body, origin, saved_by, saved_at) " +
+                "VALUES (1, 1, 'Versão anterior da skill.', '[]', 'Texto antigo.', 'user', 2, '2026-11-08T09:00:00Z')");
+
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() => Exec(c, "DELETE FROM skills")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() => Exec(c, "DELETE FROM skill_versions")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE skill_versions SET body = 'alterado'")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE skills SET name = 'outro'")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE skills SET version = 1")).Message);
+
+        Exec(c, "UPDATE skills SET version = 3, body = 'Conferir a nota e as quantidades.', updated_by = 2");
+        Assert.Equal(3L, Scalar(c, "SELECT version FROM skills WHERE name = 'recebimento'"));
     }
 
     [Theory]
@@ -153,6 +214,7 @@ public sealed class MigrationTests : IDisposable
     [InlineData("sensitive.read")]
     [InlineData("role.manage")]
     [InlineData("audit.read")]
+    [InlineData("skill.manage")]
     public void Migrated_database_refuses_escalation_of_the_ai_role(string permission)
     {
         using var db = Open();

@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using erp_inteligente.Core.Data;
 using erp_inteligente.Core.Engine;
 using erp_inteligente.Core.Llm;
+using erp_inteligente.Core.Skills;
 using erp_inteligente.Models;
 using Json.Schema;
 using Microsoft.Data.Sqlite;
@@ -16,7 +17,8 @@ using Microsoft.Data.Sqlite;
 namespace erp_inteligente.Core.Planner;
 
 /// <summary>Result of running one tool: the JSON for the model and whether the call was accepted.</summary>
-internal sealed record ToolOutcome(string Json, bool Allowed, string Code);
+/// <param name="Raw">The text is an approved instruction (a skill) sent as is, not wrapped as reference data.</param>
+internal sealed record ToolOutcome(string Json, bool Allowed, string Code, bool Raw = false);
 
 /// <summary>
 /// The read tools of the Planner. Arguments are validated by JSON Schema (and a strict regex) before they touch the
@@ -29,6 +31,7 @@ internal static partial class PlannerTools
 
     internal const string GetProduct = "get_product";
     internal const string GetStock = "get_stock";
+    internal const string LoadSkill = "load_skill";
 
     internal static readonly string[] ReadToolNames =
         [SearchProducts, GetProduct, GetStock, SearchLocations, SearchZones, SearchLots, SearchOrders, SearchPartners];
@@ -62,6 +65,9 @@ internal static partial class PlannerTools
             ObjectSchema(
                 ("sku", $$"""{"type":"string","pattern":"{{SkuRx}}"}"""),
                 ("location", $$"""{"type":"string","pattern":"{{LocationRx}}","description":"Endereço, ex.: A-01-01 ou DOCA-01"}"""))),
+        // Not in ReadToolNames: offered by the Planner only when it has a skill catalog, and run by it (not by Execute).
+        [LoadSkill] = ("Carrega o texto de uma skill (procedimento aprovado) pelo nome do índice do prompt. No máximo 3 por pedido.",
+            ObjectSchema(("nome", """{"type":"string","pattern":"^[a-z][a-z_]{1,39}$","description":"Nome da skill, como no índice"}"""), required: ["nome"])),
         [SearchLocations] = (SearchLocationsDescription, SearchLocationsSchema),
         [SearchZones] = (SearchZonesDescription, SearchZonesSchema),
         [SearchLots] = (SearchLotsDescription, SearchLotsSchema),
@@ -75,6 +81,8 @@ internal static partial class PlannerTools
     internal static IEnumerable<LlmTool> ReadTools() =>
         ReadToolNames.Select(n => new LlmTool(n, Definitions[n].Description, Definitions[n].Schema));
 
+    internal static LlmTool LoadSkillTool() => new(LoadSkill, Definitions[LoadSkill].Description, Definitions[LoadSkill].Schema);
+
     internal static bool IsReadTool(string name) => Definitions.ContainsKey(name);
 
     /// <summary>Status line (Portuguese) for a read tool; arguments are already validated.</summary>
@@ -83,6 +91,7 @@ internal static partial class PlannerTools
         string? Get(string key) => args.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         return tool switch
         {
+            LoadSkill => $"Lendo a skill {Get("nome")}",
             SearchProducts => SearchStatus(args),
             GetProduct => $"Consultando o produto {Get("sku")}",
             GetStock when Get("sku") is { } sku => $"Consultando saldo do {sku}",
@@ -126,6 +135,10 @@ internal static partial class PlannerTools
         foreach (var (key, rx) in new[] { ("sku", Sku()), ("location", Location()), ("zone", Zone()) })
             if (tool is GetProduct or GetStock && parsed.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String && !rx.IsMatch(v.GetString()!))
                 bad.Add(key);
+
+        if (tool == LoadSkill && parsed.TryGetProperty("nome", out var skillName) && skillName.ValueKind == JsonValueKind.String
+            && !SkillDocument.IsValidName(skillName.GetString()))
+            bad.Add("nome");
 
         if (tool == SearchProducts && results.IsValid)
             bad.UnionWith(InvalidSearchFields(parsed));

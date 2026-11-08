@@ -69,6 +69,13 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 - O **cache de prompt** (prompt de sistema + definições de ferramentas, que se repetem em todo pedido) não entrou na conta e reduz ainda mais o custo de entrada.
 - Haiku em tudo é ~20× mais barato, mas fica como opção configurável: o Planner é onde erros custam mais.
 
+## 2.1 Skills sob demanda (feature 4)
+
+- O prompt de sistema leva só o índice das skills: uma linha por skill (nome, descrição de até 300 caracteres e operações), cerca de 60 tokens cada. As 6 skills embutidas somam ~400 tokens no índice, contra ~4.800 se os corpos fossem todos no prompt.
+- O corpo (2,4 a 3,3 mil caracteres, ~800 tokens) entra só quando a IA chama `load_skill`, no máximo 3 por pedido.
+- Como os exemplos de plano das skills já passam pelo `DslParser`, a IA tem modelos válidos à mão, o que reduz rodadas de correção.
+- A IA também redige skills a pedido do supervisor (`propose_skill`); nada é gravado sem a confirmação dele.
+
 ## 3. RAG
 
 | Etapa | Definição |

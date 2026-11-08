@@ -231,6 +231,40 @@ CREATE INDEX idx_order_reservations_line    ON order_reservations (outbound_orde
 CREATE INDEX idx_order_reservations_balance ON order_reservations (balance_id, state);
 
 -- ---------------------------------------------------------------------------
+-- Skills: versioned instructions saved by a supervisor (origin says whether a person or the AI drafted them).
+-- The AI reads only the active ones through v_ai_skills. Guards are in security.sql.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE skills (
+    id              INTEGER PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE CHECK (length(name) BETWEEN 2 AND 40 AND name GLOB '[a-z]*' AND name NOT GLOB '*[^a-z_]*'),
+    description     TEXT NOT NULL CHECK (length(description) BETWEEN 20 AND 300),
+    operations_json TEXT NOT NULL CHECK (json_valid(operations_json) AND json_type(operations_json) = 'array'),
+    body            TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 12000),
+    version         INTEGER NOT NULL CHECK (version >= 1),
+    status          TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+    origin          TEXT NOT NULL CHECK (origin IN ('user', 'ai')),
+    created_by      INTEGER NOT NULL REFERENCES users (id),
+    created_at      TEXT NOT NULL,
+    updated_by      INTEGER NOT NULL REFERENCES users (id),
+    updated_at      TEXT NOT NULL
+) STRICT;
+
+-- One row per saved version of a skill (the current content lives in skills). Append-only.
+CREATE TABLE skill_versions (
+    id              INTEGER PRIMARY KEY,
+    skill_id        INTEGER NOT NULL REFERENCES skills (id),
+    version         INTEGER NOT NULL CHECK (version >= 1),
+    description     TEXT NOT NULL,
+    operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+    body            TEXT NOT NULL,
+    origin          TEXT NOT NULL CHECK (origin IN ('user', 'ai')),
+    saved_by        INTEGER NOT NULL REFERENCES users (id),
+    saved_at        TEXT NOT NULL,
+    UNIQUE (skill_id, version)
+) STRICT;
+
+-- ---------------------------------------------------------------------------
 -- AI memory and knowledge base (RAG)
 -- ---------------------------------------------------------------------------
 

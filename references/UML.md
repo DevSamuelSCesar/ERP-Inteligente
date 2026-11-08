@@ -206,9 +206,9 @@ classDiagram
     class RecipeMatcher {
         +MatchAsync(UserRequest request) Task~Plan?~
     }
-    class SkillRegistry {
-        +Index() SkillSummary[]
-        +Load(string name) Skill
+    class SkillCatalog {
+        +Index(rights) SkillIndexEntry[]
+        +Load(name, rights) SkillContent
     }
     class KnowledgeRetriever {
         +SearchAsync(string query, int k) Task~Chunk[]~
@@ -223,7 +223,7 @@ classDiagram
     Planner --> PlanEngine : propose_plan (só simula)
     Planner ..> PlannerResult
     PlannerTools --> AiReadConnection
-    Planner ..> SkillRegistry : feature 4
+    Planner --> SkillCatalog : índice e load_skill
     Planner ..> KnowledgeRetriever : feature 5
     Planner ..> MemoryStore : feature 5
     RecipeMatcher ..> ILlmProvider : feature 7

@@ -31,16 +31,20 @@ public sealed class PlannerNexusService(Planner planner, int maxHistoryTurns = 1
 
         return result switch
         {
-            PlannerAnswer answer => new NexusReply(answer.Text, Options: MapOptions(answer.Options)),
+            PlannerAnswer answer => new NexusReply(answer.Text, Options: MapOptions(answer.Options), Skill: MapSkill(answer.Skill)),
             PlannerProposals proposals => new NexusReply(
                 proposals.Text ?? "",
                 Proposals: proposals.Items.Select(i => new NexusProposal(i.Title, i.Rationale, i.Assumptions, i.Draft)).ToList(),
-                Options: MapOptions(proposals.Options)),
+                Options: MapOptions(proposals.Options),
+                Skill: MapSkill(proposals.Skill)),
             PlannerEscalated escalated => new NexusReply(escalated.Reason, IsEscalated: true),
             PlannerFailed failed => new NexusReply(failed.Reason, IsError: true),
             _ => new NexusReply("Falha ao processar o pedido. Nada foi gravado.", IsError: true),
         };
     }
+
+    private static NexusSkillProposal? MapSkill(SkillProposal? skill) =>
+        skill is null ? null : new NexusSkillProposal(skill.Document, skill.Reason, skill.CurrentVersion);
 
     private static IReadOnlyList<NexusOption> MapOptions(IReadOnlyList<PlannerOption> options) =>
         options.Select(o => new NexusOption(o.Label, o.Request)).ToList();

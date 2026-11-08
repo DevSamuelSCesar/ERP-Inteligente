@@ -29,6 +29,11 @@
     <EmbeddedResource Include="Core\Planner\Prompts\system.md" LogicalName="Nexus.Planner.system.md" />
   </ItemGroup>
 
+  <!-- Built-in skills (Core/Skills); the key is the frontmatter name, so the resource name only needs the prefix -->
+  <ItemGroup>
+    <EmbeddedResource Include="skills\*\SKILL.md" LogicalName="Nexus.Skills.%(RecursiveDir)SKILL.md" />
+  </ItemGroup>
+
   <!-- The test project lives under tests/ and must not be compiled into the app. -->
   <ItemGroup>
     <Compile Remove="tests\**" />

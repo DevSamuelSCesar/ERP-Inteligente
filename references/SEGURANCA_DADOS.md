@@ -71,6 +71,7 @@ As views `v_ai_zones`, `v_ai_lots` e `v_ai_partners` (migração 003) expõem zo
 | `audit.read` ler auditoria | ❌ | ✅ | ✅ | ✅ | ❌ |
 | `memory.write` gravar memória | ✅ | ✅ | — | ❌ | ✅ (com filtro) |
 | `recipe.manage` promover receitas | — | ✅ | — | — | ❌ |
+| `skill.manage` criar e editar skills | ❌ | ✅ | ❌ | ❌ | ❌ (só rascunha; quem confirma grava) |
 
 **"✅ ∩ usuário"**: a IA só pode se a pessoa que fez o pedido também puder. Exemplo: um operador pede um ajuste pela IA → o direito efetivo não tem `stock.adjust` → a IA não oferece a operação e o motor recusa o passo com `policy.denied`. Se o mesmo pedido vier de um supervisor, o plano de ajuste vai a `pending_approval` e precisa de **outro** supervisor.
 
@@ -81,8 +82,10 @@ As views `v_ai_zones`, `v_ai_lots` e `v_ai_partners` (migração 003) expõem zo
 | Linhas `DENY` em `role_permissions` | Policy engine (aplicação) |
 | IA lendo tabelas fora das views `v_ai_*` ou colunas sensíveis | *Authorizer callback* da conexão da IA |
 | IA escrevendo qualquer coisa | Conexão `Mode=ReadOnly` + *authorizer* |
-| IA recebendo `plan.approve`, `user.manage`, `role.manage`, `sensitive.read` ou `audit.read` | Trigger `role_permissions_deny_ai_escalation` |
-| Remover os `DENY` restantes da IA (`plan.approve`, `sensitive.read`, `user.manage`, `role.manage`, `audit.read`, `recipe.manage`) | Trigger `role_permissions_deny_ai_unblock` |
+| IA recebendo `plan.approve`, `user.manage`, `role.manage`, `sensitive.read`, `audit.read` ou `skill.manage` | Trigger `role_permissions_deny_ai_escalation` |
+| Remover os `DENY` restantes da IA (`plan.approve`, `sensitive.read`, `user.manage`, `role.manage`, `audit.read`, `recipe.manage`, `skill.manage`) | Trigger `role_permissions_deny_ai_unblock` |
+| Apagar skill, mudar nome ou autor, ou baixar a versão; alterar ou apagar o histórico | Triggers `skills_deny_delete`, `skills_guard_update`, `skill_versions_deny_update` e `skill_versions_deny_delete` |
+| IA lendo a tabela `skills` ou `skill_versions` | *Authorizer*: só a view `v_ai_skills` (ativas, sem autor nem datas) |
 | IA ou o próprio solicitante aprovando um plano | Triggers `plans_deny_ai_approval` e `plans_deny_self_approval` |
 | Alterar ou apagar auditoria, movimentos e planos finalizados | Triggers `*_deny_update` / `*_deny_delete` |
 | Apagar reserva ou mudá-la fora das transições permitidas | Triggers `order_reservations_deny_delete` e `order_reservations_guard_update` |
@@ -104,6 +107,18 @@ Controles que sustentam a decisão:
 5. **Auditoria:** cada chamada de ferramenta (`ai.tool`) e cada plano ficam registrados em nome do usuário.
 
 **Risco aceito.** O product owner aceitou que a IA proponha ajustes e expedições com os direitos da pessoa que pediu. Esse risco está registrado e mitigado pelos controles acima; não é um controle ausente. Risco residual: um supervisor que aprova sem conferir o resumo pode aceitar um plano errado, e uma injeção de prompt pode levar o operador a confirmar uma proposta sem ler. Por isso o resumo do plano deve ser lido antes de confirmar, e a suíte de ataques (seção 6.1) cobre esses vetores.
+
+### 3.2 Skills: instruções persistentes (feature 4)
+
+Uma skill é texto que entra no contexto da IA como instrução. Uma skill maliciosa seria uma **injeção de prompt persistente**. Controles:
+
+1. **Só o supervisor grava** (`skill.manage`); operador, administrador e auditor só leem. A IA tem `DENY` e um trigger impede conceder a permissão a ela.
+2. **A IA só rascunha:** `propose_skill` mostra o texto inteiro no Nexus, e só o Confirmar de quem pediu grava, com os direitos dessa pessoa e origem `ai`.
+3. **Sem ampliação de direitos:** operações e ferramentas oferecidas vêm do direito efetivo (IA ∩ usuário); o prompt manda as regras do sistema prevalecerem sobre a skill; o motor revalida tudo.
+4. **Texto controlado:** parser estrito, remoção de caracteres de controle, de largura zero e bidirecionais, limite de 12.000 caracteres, `<` e `>` escapados ao entregar o corpo à IA, exemplos validados pelo `DslParser`.
+5. **Rastreabilidade:** versões imutáveis em `skill_versions` e auditoria de cada gravação, sem o corpo no log.
+
+Risco residual: um supervisor pode confirmar uma skill sem ler. Por isso o quadro mostra o texto completo antes do Confirmar.
 
 ## 4. Ameaças e gargalo
 

@@ -1,0 +1,179 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.SkillsView"
+             x:DataType="vm:SkillsViewModel">
+
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
+        <KeyBinding Gesture="Escape" Command="{Binding CancelEditCommand}" />
+    </UserControl.KeyBindings>
+
+    <!-- Skills (references/UI.md, section 7.1): list on the left, detail or editor on the right -->
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto">
+            <RadioButton Classes="tab" GroupName="SkillTabs" Content="Ativas" IsChecked="{Binding ShowActive}" />
+            <RadioButton Grid.Column="1" Classes="tab" GroupName="SkillTabs" Content="Arquivadas" IsChecked="{Binding ShowArchived}" />
+            <TextBox Grid.Column="2" Width="320" HorizontalAlignment="Left" Margin="16,0,0,0"
+                     Text="{Binding FilterText}" PlaceholderText="Filtrar por nome ou descrição" MaxLength="100" />
+            <Button Grid.Column="3" Classes="neutral" Command="{Binding NewSkillCommand}" IsVisible="{Binding CanManage}"
+                    ToolTip.Tip="Escrever uma skill nova (Alt+N)">
+                <AccessText Text="_Nova skill" />
+            </Button>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="{Binding IsReadOnly}">
+            <PathIcon Classes="info" Data="{StaticResource Icon.Info}" Width="14" Height="14" />
+            <TextBlock Classes="secondary" VerticalAlignment="Center"
+                       Text="Somente leitura: criar e editar skills é do supervisor." />
+        </StackPanel>
+
+        <!-- Feedback: a line with icon and text, never a toast -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="{Binding HasFeedback}">
+            <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14" IsVisible="{Binding FeedbackIsSuccess}" />
+            <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14" IsVisible="{Binding FeedbackIsError}" />
+            <TextBlock Text="{Binding Feedback}" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid Grid.Row="3" ColumnDefinitions="340,16,*" Margin="0,12,0,0">
+            <Panel>
+                <DataGrid ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" IsEnabled="{Binding IsViewing}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn x:DataType="vm:SkillRow" Header="Nome" Binding="{Binding Name}" Width="*" />
+                        <DataGridTextColumn x:DataType="vm:SkillRow" Header="Origem" Binding="{Binding OriginText}" Width="120" />
+                        <DataGridTextColumn x:DataType="vm:SkillRow" Header="Versão" Binding="{Binding VersionText}" Width="84" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Classes="secondary" Margin="0,40,0,0" HorizontalAlignment="Center" IsVisible="{Binding IsEmpty}"
+                           Text="Nenhuma skill nesta lista." />
+            </Panel>
+
+            <Rectangle Grid.Column="1" Classes="vrule" HorizontalAlignment="Center" />
+
+            <!-- Read-only detail -->
+            <ScrollViewer Grid.Column="2" IsVisible="{Binding IsViewing}">
+                <StackPanel IsVisible="{Binding HasSelection}" Spacing="0">
+                    <TextBlock Classes="boardTitle" Text="{Binding SelectedRow.Name, FallbackValue=''}" />
+                    <TextBlock Classes="secondary" Margin="0,2,0,10" Text="{Binding SelectedMeta}" />
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="140,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Quando usar" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding SelectedRow.Description, FallbackValue=''}" TextWrapping="Wrap" />
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="140,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Operações" />
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Classes="secondary" Text="Nenhuma: só orientação." IsVisible="{Binding !HasSelectedOperations}" />
+                            <ItemsControl ItemsSource="{Binding SelectedOperations}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SkillOperationLine">
+                                        <Grid ColumnDefinitions="200,*,90" Height="24">
+                                            <TextBlock Classes="tabular" Text="{Binding Name}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Classes="secondary" Text="{Binding RiskText}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <TextBlock Classes="label" Text="Instruções" Margin="0,10,0,6" />
+                    <Border Background="{DynamicResource SurfaceBrush}" Padding="12,10">
+                        <SelectableTextBlock Name="Body" Text="{Binding SelectedRow.Record.Body, FallbackValue=''}" TextWrapping="Wrap" />
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0" IsVisible="{Binding CanManage}">
+                        <Button Classes="neutral" Command="{Binding EditCommand}" ToolTip.Tip="Gravar uma nova versão (Alt+E)"
+                                IsVisible="{Binding CanEditSelected}">
+                            <AccessText Text="_Editar" />
+                        </Button>
+                        <Button Classes="neutral" Command="{Binding PersonalizeCommand}" IsVisible="{Binding CanPersonalizeSelected}"
+                                ToolTip.Tip="Copiar a skill embutida para uma versão própria do armazém (Alt+P)">
+                            <AccessText Text="_Personalizar" />
+                        </Button>
+                        <Button Classes="neutral" Command="{Binding ArchiveCommand}" IsVisible="{Binding CanArchiveSelected}"
+                                ToolTip.Tip="O Nexus deixa de usar esta skill (Alt+A)">
+                            <AccessText Text="_Arquivar" />
+                        </Button>
+                        <Button Classes="neutral" Command="{Binding ReactivateCommand}" IsVisible="{Binding CanReactivateSelected}"
+                                ToolTip.Tip="Voltar a usar esta skill (Alt+R)">
+                            <AccessText Text="_Reativar" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Editor (skill.manage only) -->
+            <ScrollViewer Grid.Column="2" IsVisible="{Binding IsEditing}">
+                <StackPanel>
+                    <TextBlock Classes="boardTitle" Text="{Binding EditorTitle}" Margin="0,0,0,10" />
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="140,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Nome" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBox Name="NameBox" Width="320" HorizontalAlignment="Left" Text="{Binding EditName}" MaxLength="40"
+                                     PlaceholderText="ex.: devolucoes" IsEnabled="{Binding IsNameEditable}" />
+                            <TextBlock Classes="error" Text="{Binding NameError}" TextWrapping="Wrap"
+                                       IsVisible="{Binding NameError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        </StackPanel>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="140,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Quando usar" VerticalAlignment="Top" Margin="0,6,0,0" />
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBox Text="{Binding EditDescription}" MaxLength="300" TextWrapping="Wrap"
+                                     PlaceholderText="Use quando ... (é o que o Nexus lê para decidir se carrega a skill)" />
+                            <TextBlock Classes="error" Text="{Binding DescriptionError}" TextWrapping="Wrap"
+                                       IsVisible="{Binding DescriptionError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        </StackPanel>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <Grid ColumnDefinitions="140,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Operações" VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <ItemsControl ItemsSource="{Binding Choices}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:SkillOperationChoice">
+                                        <CheckBox IsChecked="{Binding IsSelected}" MinHeight="26" Padding="6,0,0,0">
+                                            <Grid ColumnDefinitions="200,300,90">
+                                                <TextBlock Classes="tabular" Text="{Binding Name}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Classes="secondary" Text="{Binding RiskText}" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Classes="error" Text="{Binding OperationsError}" TextWrapping="Wrap"
+                                       IsVisible="{Binding OperationsError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        </StackPanel>
+                    </Grid>
+                    <Rectangle Classes="rule" />
+
+                    <TextBlock Classes="label" Text="Instruções (Markdown; exemplos de plano em bloco ```json)" Margin="0,10,0,6" />
+                    <TextBox Text="{Binding EditBody}" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                             MinHeight="320" MaxLength="12000" />
+                    <TextBlock Classes="error" Text="{Binding BodyError}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               IsVisible="{Binding BodyError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                        <Button Classes="primary" Command="{Binding SaveCommand}" ToolTip.Tip="Salvar uma nova versão (Ctrl+S)">
+                            <TextBlock Text="Salvar" />
+                        </Button>
+                        <Button Classes="neutral" Command="{Binding CancelEditCommand}" ToolTip.Tip="Sair sem salvar (Esc)">
+                            <TextBlock Text="Cancelar" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -13,6 +13,7 @@ using erp_inteligente.Core.Data;
 using erp_inteligente.Core.Engine;
 using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Policy;
+using erp_inteligente.Core.Skills;
 using erp_inteligente.Models;
 
 namespace erp_inteligente.Core.Planner;
@@ -33,10 +34,15 @@ public sealed partial class Planner(
     IAuditLog audit,
     PlanEngine engine,
     PlannerOptions? options = null,
-    TimeProvider? time = null)
+    TimeProvider? time = null,
+    SkillCatalog? skills = null)
 {
     internal const string ProposePlan = "propose_plan";
     internal const string OfferOptions = "offer_options";
+    internal const string ProposeSkill = "propose_skill";
+    internal const int MaxSkillLoads = 3;
+    internal const int MaxSkillReasonLength = 300;
+    private const int MaxIndexDescriptionLength = 300;
     internal const int MaxTitleLength = 80;
     internal const int MaxRationaleLength = 300;
     internal const int MaxAssumptions = 8;
@@ -61,6 +67,9 @@ public sealed partial class Planner(
         public List<PlannerOption> Options { get; set; } = [];
         public int Invalid { get; set; }
         public HashSet<string> PlanJsons { get; } = new(StringComparer.Ordinal);
+        public List<SkillContent> LoadedSkills { get; } = [];
+        public SkillProposal? Skill { get; set; }
+        public bool HasResult => Proposals.Count > 0 || Skill is not null;
     }
 
     public Task<(PlannerResult Result, PlannerTurn? Turn)> RunAsync(
@@ -92,10 +101,16 @@ public sealed partial class Planner(
         var operations = OperationCatalog.V1.Where(o => rights.Contains(o.Permission)).ToList();
         var canPropose = rights.Contains(Permissions.PlanSubmit) && operations.Count > 0;
         var tools = PlannerTools.ReadTools().ToList();
+        if (skills is not null) tools.Add(PlannerTools.LoadSkillTool());
+        // The AI role is denied skill.manage on purpose (the AI never saves its own instructions). The tool is gated on the
+        // REQUESTING USER's right, not on the AI intersection: the AI only drafts, and the human saves with their own rights
+        // when they confirm.
+        var canDraftSkill = skills is not null && await Task.Run(() => policy.IsAllowed(user, Permissions.SkillManage), ct);
         if (canPropose) tools.Add(BuildProposeTool(operations));
+        if (canDraftSkill) tools.Add(BuildProposeSkillTool());
         tools.Add(BuildOfferOptionsTool());
 
-        var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations)) };
+        var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations, rights, canDraftSkill)) };
         foreach (var turn in history.TakeLast(_options.MaxHistoryTurns))
         {
             if (turn.Reply.Role != LlmRole.Assistant) continue;
@@ -110,7 +125,7 @@ public sealed partial class Planner(
 
         // With valid proposals in hand a limit never throws them away: the operator gets what was prepared.
         (PlannerResult, PlannerTurn?) Limit(PlannerEscalated escalated) =>
-            state.Proposals.Count > 0 ? Conclude(request, state, null, null) : (escalated, null);
+            state.HasResult ? Conclude(request, state, null, null) : (escalated, null);
 
         for (var round = 1; round <= _options.MaxRounds; round++)
         {
@@ -125,7 +140,7 @@ public sealed partial class Planner(
             }
             catch (LlmException ex)
             {
-                if (state.Proposals.Count > 0) return Conclude(request, state, null, null);
+                if (state.HasResult) return Conclude(request, state, null, null);
                 return (new PlannerFailed(MessageFor(ex.Kind)), null);
             }
             tokens += Math.Max(0, response.Usage.PromptTokens) + Math.Max(0, response.Usage.CompletionTokens);
@@ -133,7 +148,7 @@ public sealed partial class Planner(
             if (response.ToolCalls.Count == 0)
             {
                 var text = CleanText(response.Content);
-                if (state.Proposals.Count > 0)
+                if (state.HasResult)
                     return Conclude(request, state, text.Length > 0 ? text : null, response.ReasoningContent);
                 if (text.Length == 0 && state.Options.Count > 0)
                     text = "Como prefere seguir?";
@@ -155,9 +170,10 @@ public sealed partial class Planner(
                     continue;
                 }
 
-                var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, state, call, status), ct);
+                var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, canDraftSkill, state, call, status), ct);
                 if (call.Name == ProposePlan && !outcome.Allowed && outcome.Code != "too_many_proposals") state.Invalid++;
-                messages.Add(LlmMessage.ToolResult(call.Id, Wrap("tool:" + SafeToolName(call.Name), outcome.Json)));
+                if (call.Name == ProposeSkill && !outcome.Allowed && outcome.Code is not ("too_many_skill_proposals" or "not_allowed")) state.Invalid++;
+                messages.Add(LlmMessage.ToolResult(call.Id, outcome.Raw ? outcome.Json : Wrap("tool:" + SafeToolName(call.Name), outcome.Json)));
             }
 
             if (state.Proposals.Count >= _options.MaxProposals)
@@ -201,18 +217,29 @@ public sealed partial class Planner(
 
     private static (PlannerResult, PlannerTurn?) Conclude(string request, RunState state, string? text, string? reasoning)
     {
-        var shown = text ?? (state.Proposals.Count == 1
-            ? "Montei um plano para a sua confirmação."
-            : $"Montei {state.Proposals.Count} alternativas de plano para a sua escolha.");
-        var result = new PlannerProposals(state.Proposals.ToArray(), shown, state.Options.ToArray());
-        var memory = shown + " Planos: " + string.Join("; ", state.Proposals.Select(p => p.Title)) + ".";
-        return (result, Remember(request, memory.Length > MaxAnswerLength ? memory[..MaxAnswerLength] : memory, reasoning));
+        var skill = state.Skill;
+        var shown = text ?? (state.Proposals.Count switch
+        {
+            0 => $"Montei a skill {skill?.Document.Name} para a sua confirmação.",
+            1 => "Montei um plano para a sua confirmação.",
+            _ => $"Montei {state.Proposals.Count} alternativas de plano para a sua escolha.",
+        });
+        var memory = shown;
+        if (state.Proposals.Count > 0) memory += " Planos: " + string.Join("; ", state.Proposals.Select(p => p.Title)) + ".";
+        if (skill is not null) memory += " Skill proposta: " + skill.Document.Name + ".";
+        if (memory.Length > MaxAnswerLength) memory = memory[..MaxAnswerLength];
+
+        PlannerResult result = state.Proposals.Count > 0
+            ? new PlannerProposals(state.Proposals.ToArray(), shown, state.Options.ToArray(), skill)
+            : new PlannerAnswer(shown, state.Options.ToArray(), skill);
+        return (result, Remember(request, memory, reasoning));
     }
 
     // ---- tools ---------------------------------------------------------------------------------------------
 
     private ToolOutcome RunTool(
-        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canPropose, RunState state, LlmToolCall call, IProgress<string> status)
+        UserSession user, long? aiUserId, IReadOnlySet<string> rights, bool canPropose, bool canDraftSkill, RunState state, LlmToolCall call,
+        IProgress<string> status)
     {
         var name = call.Name ?? string.Empty;
         try
@@ -221,7 +248,24 @@ public sealed partial class Planner(
             {
                 if (!canPropose)
                     return Finish(PlannerTools.Error("not_allowed", "Você não tem permissão para propor planos."));
-                return ProposePlanTool(user, aiUserId, state, call, status);
+                return ProposePlanTool(user, aiUserId, rights, state, call, status);
+            }
+            if (name == ProposeSkill)
+            {
+                if (!canDraftSkill)
+                    return Finish(PlannerTools.Error("not_allowed", "Você não tem permissão para propor skills."));
+                return ProposeSkillTool(user, aiUserId, state, call, status);
+            }
+            if (name == PlannerTools.LoadSkill)
+            {
+                if (skills is null)
+                    return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
+                if (!rights.Contains(Permissions.StockRead))
+                    return Finish(PlannerTools.Error("not_allowed", "Sem permissão de consulta."));
+                var bad = PlannerTools.Validate(name, call.ArgumentsJson, out var skillArgs);
+                if (bad is not null) return Finish(bad);
+                status.Report(PlannerTools.StatusFor(name, skillArgs));
+                return Finish(LoadSkillTool(rights, state, skillArgs.GetProperty("nome").GetString()!));
             }
             if (name == OfferOptions)
                 return Finish(OfferOptionsTool(state, call));
@@ -252,7 +296,8 @@ public sealed partial class Planner(
         }
     }
 
-    private ToolOutcome ProposePlanTool(UserSession user, long? aiUserId, RunState state, LlmToolCall call, IProgress<string> status)
+    private ToolOutcome ProposePlanTool(
+        UserSession user, long? aiUserId, IReadOnlySet<string> rights, RunState state, LlmToolCall call, IProgress<string> status)
     {
         ToolOutcome Reject(ToolOutcome outcome)
         {
@@ -288,6 +333,7 @@ public sealed partial class Planner(
             return Reject(PlannerTools.Error("invalid_arguments",
                 "Argumentos inválidos: " + string.Join(", ", bad.Distinct()) + ". Envie title (1 a 80), rationale (1 a 300), " +
                 "assumptions (até 8 textos de até 200) e plan {dsl_version, intent, steps}."));
+        planJson = WithSkill(planJson, state, rights);
         if (!state.PlanJsons.Add(planJson))
             return Reject(PlannerTools.Error("duplicate_plan", "Este plano já foi proposto. Proponha uma alternativa diferente ou encerre com texto."));
 
@@ -321,6 +367,116 @@ public sealed partial class Planner(
         state.Proposals.Add(new ProposalItem(title, rationale, assumptions, PlanDraft.FromJson(planJson, PlanOrigin.Ai), preview));
         var summary = new JsonObject { ["status"] = "valid", ["proposals"] = state.Proposals.Count, ["risk"] = preview.Risk.ToString().ToLowerInvariant() };
         return new ToolOutcome(PlannerTools.Serialize(summary), true, "plan_valid");
+    }
+
+    /// <summary>
+    /// Sets the plan's <c>skill</c> field (the model's choice is only a hint): a skill loaded in this run wins, then a known
+    /// skill the model named, then the deterministic mapping from the first step's operation.
+    /// </summary>
+    private string WithSkill(string planJson, RunState state, IReadOnlySet<string> rights)
+    {
+        if (TryParseObject(planJson, out var plan)
+            && plan["steps"] is JsonArray { Count: > 0 } steps && steps[0] is JsonObject first
+            && first["op"] is JsonValue opValue && opValue.TryGetValue<string>(out var op) && OperationCatalog.TryGet(op, out _))
+        {
+            var given = plan["skill"] is JsonValue v && v.TryGetValue<string>(out var g) && SkillDocument.IsValidName(g) ? g : null;
+            string? chosen;
+            if (given is not null && state.LoadedSkills.Any(l => l.Name == given)) chosen = given;
+            else if (state.LoadedSkills.FirstOrDefault(l => l.Operations.Contains(op)) is { } loaded) chosen = loaded.Name;
+            else if (given is not null && skills?.Load(given, rights) is not null) chosen = given;
+            else chosen = SkillMapping.ForOperation(op);
+            plan["skill"] = chosen;
+            return plan.ToJsonString();
+        }
+        return planJson;
+    }
+
+    /// <summary>
+    /// Returns the approved body of a skill as an instruction (not as <c>&lt;dados&gt;</c>): the prompt tells the model its
+    /// limits. '&lt;' and '&gt;' are escaped so the body can never close the surrounding tag.
+    /// </summary>
+    private ToolOutcome LoadSkillTool(IReadOnlySet<string> rights, RunState state, string name)
+    {
+        if (state.LoadedSkills.Any(l => l.Name == name))
+            return new ToolOutcome("""{"status":"already_loaded"}""", true, "already_loaded");
+        if (state.LoadedSkills.Count >= MaxSkillLoads)
+            return PlannerTools.Error("too_many_skills", $"Já foram carregadas {MaxSkillLoads} skills neste pedido. Siga com elas.");
+
+        var content = skills!.Load(name, rights);
+        if (content is null)
+            return PlannerTools.Error("skill_not_found", "Skill não encontrada. Use um nome do índice.");
+        state.LoadedSkills.Add(content);
+        var body = content.Body.Replace("<", "&lt;", StringComparison.Ordinal).Replace(">", "&gt;", StringComparison.Ordinal);
+        var text = $"<skill nome=\"{content.Name}\" versao=\"{content.Version}\">\n{body}\n</skill>";
+        return new ToolOutcome(text, true, "skill_loaded", Raw: true);
+    }
+
+    private ToolOutcome ProposeSkillTool(UserSession user, long? aiUserId, RunState state, LlmToolCall call, IProgress<string> status)
+    {
+        // Audited with the outcome code only: the body of a skill never goes to the audit log.
+        ToolOutcome Reject(ToolOutcome outcome)
+        {
+            Append(aiUserId, user, "ai.tool", "tool:" + ProposeSkill, AuditOutcome.Denied, Details(call, outcome.Code));
+            return outcome;
+        }
+
+        if (state.Skill is not null)
+            return Reject(PlannerTools.Error("too_many_skill_proposals", "Já há uma skill proposta. Encerre com um texto curto."));
+        if (!TryParseObject(call.ArgumentsJson, out var root))
+            return Reject(PlannerTools.Error("invalid_arguments", "Os argumentos não são um objeto JSON válido."));
+
+        var issues = new List<SkillIssue>();
+        foreach (var key in root.Select(p => p.Key))
+            if (key is not ("nome" or "descricao" or "operacoes" or "corpo" or "motivo"))
+            {
+                issues.Add(new SkillIssue("argumentos", "Há campos desconhecidos. Envie só nome, descricao, operacoes, corpo e motivo."));
+                break;
+            }
+        string? Text(string field)
+        {
+            if (root[field] is JsonValue v && v.TryGetValue<string>(out var t)) return t;
+            issues.Add(new SkillIssue(field, "Campo obrigatório (texto)."));
+            return null;
+        }
+        var nome = Text("nome");
+        var descricao = Text("descricao");
+        var corpo = Text("corpo");
+        var motivoRaw = Text("motivo");
+        var operations = new List<string>();
+        if (root["operacoes"] is JsonArray list && list.Count <= SkillDocument.MaxOperations)
+        {
+            foreach (var item in list)
+            {
+                if (item is JsonValue v && v.TryGetValue<string>(out var op)) operations.Add(op);
+                else { issues.Add(new SkillIssue("operacoes", "Use uma lista de nomes de operações (texto).")); break; }
+            }
+        }
+        else
+            issues.Add(new SkillIssue("operacoes", $"Envie uma lista com até {SkillDocument.MaxOperations} operações."));
+        var motivo = CleanInline(motivoRaw);
+        if (motivoRaw is not null && (motivo.Length == 0 || motivo.Length > MaxSkillReasonLength))
+            issues.Add(new SkillIssue("motivo", $"O motivo deve ter de 1 a {MaxSkillReasonLength} caracteres."));
+
+        SkillDocument? document = null;
+        if (issues.Count == 0)
+        {
+            document = new SkillDocument(nome!, descricao!, operations, corpo!).Normalized();
+            issues.AddRange(document.Validate());
+        }
+        if (issues.Count > 0 || document is null)
+        {
+            var errors = new JsonArray();
+            foreach (var issue in issues.Take(MaxReportedErrors))
+                errors.Add(new JsonObject { ["field"] = issue.Field, ["message"] = issue.Message });
+            var json = PlannerTools.Serialize(new JsonObject { ["status"] = "invalid", ["errors"] = errors });
+            return Reject(new ToolOutcome(json, false, "skill_invalid"));
+        }
+
+        status.Report("Validando a skill");
+        var current = skills!.Load(document.Name)?.Version;
+        state.Skill = new SkillProposal(document, motivo, current);
+        Append(aiUserId, user, "ai.tool", "tool:" + ProposeSkill, AuditOutcome.Allowed, Details(call, "skill_valid"));
+        return new ToolOutcome("""{"status":"valid"}""", true, "skill_valid");
     }
 
     private static ToolOutcome OfferOptionsTool(RunState state, LlmToolCall call)
@@ -491,6 +647,32 @@ public sealed partial class Planner(
         return new LlmTool(ProposePlan, sb.ToString(), schema.ToJsonString());
     }
 
+    private static LlmTool BuildProposeSkillTool()
+    {
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["required"] = new JsonArray("nome", "descricao", "operacoes", "corpo", "motivo"),
+            ["properties"] = new JsonObject
+            {
+                ["nome"] = new JsonObject { ["type"] = "string", ["pattern"] = "^[a-z][a-z_]{1,39}$", ["description"] = "Nome da skill; o mesmo nome de uma existente a melhora." },
+                ["descricao"] = new JsonObject { ["type"] = "string", ["minLength"] = SkillDocument.MinDescriptionLength, ["maxLength"] = SkillDocument.MaxDescriptionLength, ["description"] = "Começa por \"Use quando\"." },
+                ["operacoes"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["maxItems"] = SkillDocument.MaxOperations,
+                    ["items"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(OperationCatalog.V1.Select(o => (JsonNode?)JsonValue.Create(o.Name)).ToArray()) },
+                },
+                ["corpo"] = new JsonObject { ["type"] = "string", ["maxLength"] = SkillDocument.MaxBodyLength, ["description"] = "Markdown em português: Passos, Regras, Padrões quando faltar informação e Exemplo de plano em bloco ```json." },
+                ["motivo"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = MaxSkillReasonLength, ["description"] = "Por que esta skill (ou esta mudança) ajuda." },
+            },
+        };
+        return new LlmTool(ProposeSkill,
+            "Propõe a criação ou melhoria de uma skill ao supervisor. Nada é gravado até ele confirmar. Chame no máximo uma vez com sucesso.",
+            schema.ToJsonString());
+    }
+
     private static string DescribeArgs(OperationDefinition op)
     {
         var node = JsonNode.Parse(OperationCatalog.SchemaJson(op.Name))!;
@@ -506,10 +688,11 @@ public sealed partial class Planner(
 
     // ---- prompt --------------------------------------------------------------------------------------------
 
-    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot)\}")]
+    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot|skills|skill_authoring)\}")]
     private static partial Regex PlaceholderPattern();
 
-    private string BuildSystemPrompt(UserSession user, IReadOnlyList<OperationDefinition> operations)
+    private string BuildSystemPrompt(
+        UserSession user, IReadOnlyList<OperationDefinition> operations, IReadOnlySet<string> rights, bool canDraftSkill)
     {
         using var stream = typeof(Planner).Assembly.GetManifestResourceStream(PromptResource)
             ?? throw new InvalidOperationException("Embedded resource not found: " + PromptResource);
@@ -533,10 +716,32 @@ public sealed partial class Planner(
             ["operator"] = Sanitize("um usuário com papel " + user.RoleName),
             ["operations"] = offered,
             ["unavailable"] = unavailable,
+            ["skills"] = SkillIndexText(rights),
+            ["skill_authoring"] = canDraftSkill ? SkillAuthoring : string.Empty,
             ["today"] = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             ["today_lot"] = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture),
         };
         return PlaceholderPattern().Replace(template, m => values[m.Groups[1].Value]).TrimEnd();
+    }
+
+    private const string SkillAuthoring =
+        "Criar ou melhorar skill: quando pedirem, consulte as skills existentes (load_skill) e os dados pelas ferramentas, " +
+        "escreva em português no formato: descrição começando por \"Use quando\"; seções Passos, Regras, Padrões quando faltar " +
+        "informação e Exemplo de plano em bloco ```json válido usando só as operações listadas em operacoes. " +
+        "Chame propose_skill direto, sem perguntar; nada é gravado até o supervisor confirmar. Melhorar uma existente é usar o mesmo nome.";
+
+    /// <summary>One line per skill usable with <paramref name="rights"/>; descriptions are model-visible text, so they are sanitized.</summary>
+    private string SkillIndexText(IReadOnlySet<string> rights)
+    {
+        var entries = skills?.Index(rights) ?? [];
+        if (entries.Count == 0) return "Nenhuma skill disponível.";
+        return string.Join("\n", entries.Select(e =>
+        {
+            var description = new string(CleanInline(e.Description).Where(c => c is not ('<' or '>')).ToArray());
+            if (description.Length > MaxIndexDescriptionLength) description = description[..MaxIndexDescriptionLength];
+            var ops = e.Operations.Where(o => OperationCatalog.TryGet(o, out _)).ToList();
+            return $"- {e.Name}: {description}" + (ops.Count > 0 ? $" (operações: {string.Join(", ", ops)})" : string.Empty);
+        }));
     }
 
     private static string RiskText(RiskLevel risk) => risk switch
@@ -572,7 +777,7 @@ public sealed partial class Planner(
 
     /// <summary>Tool name for audit and for the data wrapper: only known names are echoed.</summary>
     private static string SafeToolName(string name) =>
-        name is ProposePlan or OfferOptions || PlannerTools.IsReadTool(name) ? name : "unknown";
+        name is ProposePlan or OfferOptions or ProposeSkill || PlannerTools.IsReadTool(name) ? name : "unknown";
 
     private static readonly JsonSerializerOptions DetailsOptions = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
 
@@ -580,9 +785,10 @@ public sealed partial class Planner(
     private static string Details(LlmToolCall call, string code)
     {
         var args = call.ArgumentsJson ?? string.Empty;
+        if (call.Name == ProposeSkill) args = string.Empty; // the skill body is never audited
         if (args.Length > MaxAuditArgsLength) args = args[..MaxAuditArgsLength] + "…";
         var name = call.Name ?? string.Empty;
-        if (!PlannerTools.IsReadTool(name) && name is not (ProposePlan or OfferOptions))
+        if (!PlannerTools.IsReadTool(name) && name is not (ProposePlan or OfferOptions or ProposeSkill))
             name = name.Length > 40 ? name[..40] : name;
         return JsonSerializer.Serialize(new { code, tool = name, args }, DetailsOptions);
     }
