@@ -41,7 +41,12 @@ public sealed record OrderRow(string Number, string Kind, string Party, int Line
 public sealed record RecipeRow(string Name, string Skill, string Description, int Uses, string Status);
 
 /// <param name="IsDenied">The event was refused (outcome <c>denied</c>), e.g. a failed login or a blocked permission.</param>
-public sealed record AuditRow(DateTimeOffset At, string User, string Action, string Detail, bool IsDenied = false)
+/// <param name="Category">Group of the action for the audit panel: Planos, IA, Segurança, Conhecimento or Sistema.</param>
+/// <param name="IsFailed">The event failed (outcome <c>failed</c>), e.g. a plan that did not execute.</param>
+public sealed record AuditRow(DateTimeOffset At, string User, string Action, string Detail, bool IsDenied = false,
+    string Category = "Sistema", bool IsFailed = false)
 {
     public string AtText => At.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+
+    public string OutcomeText => IsDenied ? "Negado" : IsFailed ? "Falhou" : "";
 }

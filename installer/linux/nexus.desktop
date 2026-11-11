@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus ERP
+Comment=WMS gerenciável por IA
+Exec=@TARGET@/erp_inteligente
+Terminal=false
+Categories=Office;

@@ -9,6 +9,7 @@ using erp_inteligente.Core.Engine;
 using erp_inteligente.Core.Knowledge;
 using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Memory;
+using erp_inteligente.Core.Operations;
 using erp_inteligente.Core.Planner;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Core.Recipes;
@@ -28,8 +29,9 @@ public sealed class AppHost : IDisposable
 {
     /// <param name="secrets">The OS key store; it also holds the DeepSeek key (references/ARQUITETURA.md, section 12.10).</param>
     /// <param name="llm">The provider; null builds the real DeepSeek client (tests pass a scripted one).</param>
+    /// <param name="runScheduledJobs">Runs the daily jobs now (feature 9: backup and memory maintenance); the app does, tests do not.</param>
     public AppHost(NexusDatabase database, TimeProvider time, Argon2Parameters passwordParameters, AuthOptions authOptions,
-        ISecretStore secrets, ILlmProvider? llm = null)
+        ISecretStore secrets, ILlmProvider? llm = null, bool runScheduledJobs = false)
     {
         Database = database;
         Time = time;
@@ -39,6 +41,9 @@ public sealed class AppHost : IDisposable
         Auth = new AuthService(database, new PasswordHasher(passwordParameters), Policy, AuditLog, time, authOptions);
         Session = new SessionService(Auth, time, authOptions);
         MemoryStore = new MemoryStore(database, Policy, AuditLog, time);
+        MemoryMaintenance = new MemoryMaintenance(database, AuditLog, time, Policy);
+        UsageLog = new LlmUsageLog(database, time, Policy);
+        Backups = new BackupService(database, Policy, AuditLog, time);
         var skills = new SkillCatalog(database);
         RecipeStore = new RecipeStore(database, Policy, AuditLog, time, skills);
         Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore, RecipeStore);
@@ -76,9 +81,23 @@ public sealed class AppHost : IDisposable
         KnowledgeRetriever = new KnowledgeRetriever(database);
         Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: skills,
             memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever,
-            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings));
+            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings, UsageLog), usage: UsageLog);
         SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
+        if (runScheduledJobs)
+            RunScheduledJobs();
+    }
+
+    /// <summary>
+    /// The daily jobs of feature 9, at startup: a backup when the last one is older than a day, and the memory maintenance
+    /// when it has not run for a day. A failure is traced and never stops the app.
+    /// </summary>
+    public void RunScheduledJobs()
+    {
+        try { Backups.CreateScheduled(); }
+        catch (Exception ex) { Trace.TraceWarning("Scheduled backup failed: " + ex.GetType().Name); }
+        try { MemoryMaintenance.RunScheduled(); }
+        catch (Exception ex) { Trace.TraceWarning("Scheduled memory maintenance failed: " + ex.GetType().Name); }
     }
 
     public NexusDatabase Database { get; }
@@ -96,6 +115,9 @@ public sealed class AppHost : IDisposable
     public SkillStore SkillStore { get; }
     public MemoryStore MemoryStore { get; }
     public RecipeStore RecipeStore { get; }
+    public MemoryMaintenance MemoryMaintenance { get; }
+    public LlmUsageLog UsageLog { get; }
+    public BackupService Backups { get; }
     public MemoryRetriever MemoryRetriever { get; }
     public KnowledgeRetriever KnowledgeRetriever { get; }
 
@@ -105,7 +127,7 @@ public sealed class AppHost : IDisposable
     /// <summary>Opens (or creates on first run) the database at <paramref name="databasePath"/> with keys from <paramref name="store"/>.</summary>
     public static AppHost Open(string databasePath, ISecretStore store) =>
         new(DatabaseBootstrapper.OpenOrCreate(databasePath, new KeyManager(store)),
-            TimeProvider.System, Argon2Parameters.Default, AuthOptions.Default, store);
+            TimeProvider.System, Argon2Parameters.Default, AuthOptions.Default, store, runScheduledJobs: true);
 
     /// <summary>Indexes the embedded procedures (idempotent). A failure only leaves the search empty: the app still starts.</summary>
     private static void SyncKnowledge(NexusDatabase database)
@@ -139,8 +161,9 @@ public sealed class AppHost : IDisposable
             $"{Database.Path} (criptografado com SQLCipher)",
             LlmSettingsService,
             new SqliteSkillService(SkillStore, Session),
-            new SqliteMemoryService(MemoryStore, Session),
-            new SqliteRecipeService(RecipeStore, Session));
+            new SqliteMemoryService(MemoryStore, Session, MemoryMaintenance),
+            new SqliteRecipeService(RecipeStore, Session),
+            new SqliteOperationsService(Database, Policy, UsageLog, Backups, Session, Time));
 
     public void Dispose() => Database.Dispose();
 }

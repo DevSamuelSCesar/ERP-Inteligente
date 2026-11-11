@@ -47,7 +47,7 @@ A janela tem duas regiões fixas:
 - A ordem é fixa:
   1. **Nexus**, primeiro e selecionado ao abrir o app.
   2. As telas de consulta: Estoque, Endereços, Pedidos.
-  3. Planos (histórico e aprovações pendentes), Skills, Memórias, Receitas, Auditoria.
+  3. Planos (histórico e aprovações pendentes), Skills, Memórias, Receitas, Auditoria, Custos de IA.
   4. No rodapé, separados: o usuário logado, as configurações e o botão de sair.
 - Planos mostra um contador de aprovações pendentes quando o usuário pode aprovar.
 - A coluna não muda ao navegar. Só o container de conteúdo troca.

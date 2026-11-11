@@ -23,6 +23,9 @@ public sealed record ProviderOption(LlmProviderKind Kind, string Label)
 /// <summary>One line of the key status list: provider, whether its key is in the key store.</summary>
 public sealed record ProviderStatusRow(string Name, bool IsConfigured, string StatusText);
 
+/// <summary>One backup file in the list.</summary>
+public sealed record BackupRow(string FileName, string CreatedText, string SizeText);
+
 /// <summary>
 /// Session and application information, plus the LLM section (feature 8):
 /// <list type="bullet">
@@ -38,12 +41,17 @@ public sealed partial class SettingsViewModel : PageViewModel
 {
     private readonly UserSession _user;
     private readonly LlmSettingsService? _llm;
+    private readonly IOperationsService? _operations;
     private bool _loading;
 
-    public SettingsViewModel(UserSession user, string databaseDescription, LlmSettingsService? llm = null)
+    /// <param name="operations">Backups (feature 9); the section is shown to administrators only.</param>
+    public SettingsViewModel(UserSession user, string databaseDescription, LlmSettingsService? llm = null, IOperationsService? operations = null)
     {
         _user = user;
         _llm = llm;
+        _operations = operations;
+        HasBackups = operations is not null && user.Has(Permissions.UserManage);
+        BackupDirectory = operations?.BackupDirectory ?? "";
         Fields =
         [
             new("Usuário", $"{user.DisplayName} ({user.Username})"),
@@ -183,10 +191,106 @@ public sealed partial class SettingsViewModel : PageViewModel
     [NotifyCanExecuteChangedFor(nameof(SaveLocalPortCommand))]
     public partial string LocalPortText { get; set; } = "";
 
+    // ---- backups (feature 9) -------------------------------------------------------------------------------
+
+    /// <summary>Administrators manage backups: copies encrypted with this machine's key, in a folder next to the database.</summary>
+    public bool HasBackups { get; }
+
+    public string BackupDirectory { get; }
+
+    public ObservableCollection<BackupRow> Backups { get; } = [];
+
+    public bool HasNoBackups => Backups.Count == 0;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RequestRestoreCommand))]
+    public partial BackupRow? SelectedBackup { get; set; }
+
+    partial void OnSelectedBackupChanged(BackupRow? value) => PendingRestore = null;
+
+    /// <summary>The backup the administrator asked to restore; the second click confirms.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsConfirmingRestore), nameof(RestoreQuestion))]
+    [NotifyCanExecuteChangedFor(nameof(ConfirmRestoreCommand))]
+    public partial BackupRow? PendingRestore { get; private set; }
+
+    public bool IsConfirmingRestore => PendingRestore is not null;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBackupFeedback))]
+    public partial string BackupFeedback { get; private set; } = "";
+
+    [ObservableProperty] public partial bool BackupFeedbackIsError { get; private set; }
+
+    public bool HasBackupFeedback => BackupFeedback.Length > 0;
+
+    public string RestoreQuestion => PendingRestore is null ? "" :
+        $"Restaurar {PendingRestore.FileName} ({PendingRestore.CreatedText})? Tudo o que foi feito depois dele some do banco. " +
+        "Antes, o estado atual é salvo num backup novo.";
+
+    public override async Task OnActivatedAsync()
+    {
+        if (HasBackups) await LoadBackupsAsync();
+    }
+
+    private async Task LoadBackupsAsync()
+    {
+        try
+        {
+            var list = await _operations!.ListBackupsAsync();
+            Backups.Clear();
+            foreach (var b in list)
+                Backups.Add(new BackupRow(b.FileName, b.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture),
+                    (b.SizeBytes / 1024.0).ToString("N0", CultureInfo.GetCultureInfo("pt-BR")) + " KB"));
+            OnPropertyChanged(nameof(HasNoBackups));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Trace.TraceError("Backup list failed: {0}", ex.GetType().Name);
+        }
+    }
+
+    private bool CanCreateBackup() => HasBackups && !IsWorking;
+
+    [RelayCommand(CanExecute = nameof(CanCreateBackup))]
+    private async Task CreateBackupAsync()
+    {
+        await Run(async () =>
+        {
+            await _operations!.CreateBackupAsync();
+            return (string?)null;
+        }, "Backup criado e verificado. Ele só abre com a chave deste computador.", backup: true);
+        await LoadBackupsAsync();
+    }
+
+    private bool CanRequestRestore() => HasBackups && !IsWorking && SelectedBackup is not null;
+
+    [RelayCommand(CanExecute = nameof(CanRequestRestore))]
+    private void RequestRestore() => PendingRestore = SelectedBackup;
+
+    [RelayCommand]
+    private void CancelRestore() => PendingRestore = null;
+
+    private bool CanConfirmRestore() => HasBackups && !IsWorking && PendingRestore is not null;
+
+    [RelayCommand(CanExecute = nameof(CanConfirmRestore))]
+    private async Task ConfirmRestoreAsync()
+    {
+        var name = PendingRestore!.FileName;
+        PendingRestore = null;
+        await Run(async () =>
+        {
+            await _operations!.RestoreBackupAsync(name);
+            return (string?)null;
+        }, $"Banco restaurado de {name}. Saia e entre de novo para ver os dados restaurados.", backup: true);
+        await LoadBackupsAsync();
+    }
+
     // ---- commands ------------------------------------------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SaveKeyCommand), nameof(ClearKeyCommand), nameof(TestCommand), nameof(SaveLocalPortCommand), nameof(TestLocalCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveKeyCommand), nameof(ClearKeyCommand), nameof(TestCommand), nameof(SaveLocalPortCommand), nameof(TestLocalCommand),
+        nameof(CreateBackupCommand), nameof(RequestRestoreCommand), nameof(ConfirmRestoreCommand))]
     public partial bool IsWorking { get; private set; }
 
     [ObservableProperty] public partial string Feedback { get; private set; } = "";
@@ -255,10 +359,12 @@ public sealed partial class SettingsViewModel : PageViewModel
     private Task TestLocalAsync() => Run(() => _llm!.TestAsync(LlmProviderKind.Local), "Modelo local respondendo.");
 
     /// <summary>Runs a settings action off the UI thread; the work returns an error message or null on success.</summary>
-    private async Task Run(Func<Task<string?>> work, string success)
+    /// <param name="backup">Reports in the backup section instead of the LLM section.</param>
+    private async Task Run(Func<Task<string?>> work, string success, bool backup = false)
     {
         IsWorking = true;
         Feedback = "";
+        BackupFeedback = "";
         FeedbackIsError = FeedbackIsSuccess = false;
         string? error;
         try
@@ -268,6 +374,10 @@ public sealed partial class SettingsViewModel : PageViewModel
         catch (ArgumentException)
         {
             error = "Valor inválido: a chave deve ter de 8 a 200 caracteres, sem espaços.";
+        }
+        catch (Core.Operations.BackupException ex)
+        {
+            error = ex.Message;
         }
         catch (PolicyDeniedException)
         {
@@ -283,9 +393,17 @@ public sealed partial class SettingsViewModel : PageViewModel
             IsWorking = false;
         }
 
-        Feedback = error ?? success;
-        FeedbackIsError = error is not null;
-        FeedbackIsSuccess = error is null;
+        if (backup)
+        {
+            BackupFeedback = error ?? success;
+            BackupFeedbackIsError = error is not null;
+        }
+        else
+        {
+            Feedback = error ?? success;
+            FeedbackIsError = error is not null;
+            FeedbackIsSuccess = error is null;
+        }
         RefreshStatus();
     }
 

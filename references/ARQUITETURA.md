@@ -258,6 +258,11 @@ Tabela `memories` no SQLite:
 - **Origem:** correções do operador, rejeições na aprovação, erros de validação recorrentes e o resultado das execuções.
 - **Busca:** FTS5 com ranking BM25, combinado com filtro por escopo, confiança e recência.
 - **Manutenção:** um job periódico deduplica, mescla memórias parecidas e descarta as de baixa confiança ou sem uso.
+  - **Estado (feature 9):** `MemoryMaintenance` roda uma vez por dia na abertura, ou quando o supervisor pede na tela Memórias. Dentro do mesmo armazém, tipo e escopo, arquiva:
+    - textos iguais (sem diferenciar maiúsculas, acentos e pontuação);
+    - textos parecidos (≥ 80% das palavras em comum);
+    - os sem uso: da IA, nunca usadas e com a confiança inicial depois de 30 dias; da IA ou do sistema, sem uso há 180 dias.
+  - A que fica herda os usos e a maior confiança. As do supervisor nunca são arquivadas pelo job. Cada execução gera uma linha `memory.maintenance` com as contagens e os ids, sem o texto.
 - **Estado (feature 5, 2026-11-08):**
   - Cada memória pertence a um armazém (`warehouse_id`) e tem `status` (ativa ou arquivada), `origin` (`ai`, `system` ou `user`) e autor. Memórias não são apagadas, só arquivadas (trigger).
   - **Gravação automática:** a IA chama `remember` (exige `memory.write` no direito efetivo; confiança inicial 0,3), e a rejeição de um plano da IA vira uma correção de origem `system` (0,6). Uma memória igual já existente é reforçada (+0,1, até 0,9) em vez de duplicada.
@@ -408,6 +413,10 @@ A classificação coluna por coluna está em [`SEGURANCA_DADOS.md`](SEGURANCA_DA
 4. **Senhas** guardadas apenas como hash Argon2id, no formato PHC `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>` (64 MiB, 3 iterações, paralelismo 4, conforme a RFC 9106; salt de 16 bytes e hash de 32 bytes).
    - A verificação usa os parâmetros gravados na própria string, compara em tempo constante e recusa parâmetros fora de limites seguros (proteção contra uma linha adulterada que force um custo absurdo).
 5. **Backups** feitos pela API de backup do SQLite a partir do banco aberto com SQLCipher, então continuam criptografados.
+   - **Estado (feature 9):** `Core/Operations/BackupService` grava em `backups/`, ao lado do banco, com a mesma chave. Um backup automático por dia na abertura, guardando os 7 mais recentes, e backups manuais pelo administrador (`user.manage`) em Configurações.
+   - A cópia passa por `integrity_check`.
+   - **Restauração:** confere se o backup abre com a chave do cofre, se a versão do schema é a do app, a integridade e a cadeia de auditoria. Antes, salva o estado atual num backup novo. Depois copia o backup sobre o banco aberto pela mesma API e registra `backup.restore`.
+   - Um backup só abre com o cofre da máquina que o fez: perder o cofre torna os backups ilegíveis, de propósito.
 
 ### 12.4 Proteção em trânsito e minimização
 
@@ -471,6 +480,7 @@ No policy engine (`Core/Policy`):
   - O escritor insere com `BEGIN IMMEDIATE`, com `id` e `occurred_at` (`AAAA-MM-DDTHH:MM:SSZ`, UTC) explícitos, para que o hash seja calculado sobre os mesmos valores gravados.
   - Há implementações de referência iguais em Python (`db/tests/test_db.py`) e C# (`Core/Audit`); as linhas do seed já têm os hashes reais.
   - O alerta de quebra aparece no app para quem tem `audit.read`, indicando a primeira linha inválida.
+  - **Painel (feature 9):** a tela Auditoria mostra os últimos 500 eventos com filtros por categoria (Planos, IA, Segurança, Conhecimento, Sistema) e por problema (negado ou falhou), e verifica a cadeia inteira ao abrir e quando pedido. A tela Custos de IA mostra o consumo registrado em `llm_usage` (só inserção, uma linha por pedido e papel, sem texto): pedidos, % resolvida por receita, tokens por pedido e custo estimado por papel, provedor e modelo.
 - **O que é auditado:** login, cada chamada de ferramenta da IA (permitida ou negada), cada plano (submetido, rejeitado, aprovado, executado), mudanças de permissão e leituras de dados sensíveis.
 
 ### 12.8 Defesa contra prompt injection

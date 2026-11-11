@@ -148,7 +148,7 @@ public sealed partial class MemoriesViewModel : PageViewModel
     public partial bool IsEditorValid { get; private set; }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(SaveCommand), nameof(ArchiveCommand), nameof(ReactivateCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand), nameof(ArchiveCommand), nameof(ReactivateCommand), nameof(MaintainCommand))]
     public partial bool IsWorking { get; private set; }
 
     [ObservableProperty]
@@ -255,6 +255,32 @@ public sealed partial class MemoriesViewModel : PageViewModel
         {
             await action(id);
             SetFeedback(done, isError: false);
+            await ReloadAsync(null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            SetFeedback(MessageFor(ex), isError: true);
+        }
+        finally
+        {
+            IsWorking = false;
+        }
+    }
+
+    private bool CanMaintain() => CanStartEditing() && !IsWorking;
+
+    /// <summary>Feature 9: archives duplicates, near-duplicates and stale memories now (it also runs once a day).</summary>
+    [RelayCommand(CanExecute = nameof(CanMaintain))]
+    private async Task MaintainAsync()
+    {
+        IsWorking = true;
+        try
+        {
+            var report = await _memories.MaintainAsync();
+            SetFeedback(report.Total == 0
+                ? "Manutenção feita: nada a arquivar."
+                : $"Manutenção feita: {report.Duplicates} repetida(s), {report.Merged} parecida(s) e {report.Stale} sem uso arquivada(s). Veja em Arquivadas.",
+                isError: false);
             await ReloadAsync(null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

@@ -28,9 +28,13 @@ public sealed partial class Planner
         }
         catch (PolicyDeniedException)
         {
+            recipeMatcher.RecordUsage(user, match.Choice, match.Usage, "no_match");
             return null;
         }
-        if (!preview.IsValid || preview.Document is null) return null;
+        // Counted as solved by a recipe only when its plan passed the simulation; otherwise the Planner takes over.
+        var solved = preview.IsValid && preview.Document is not null;
+        recipeMatcher.RecordUsage(user, match.Choice, match.Usage, solved ? "recipe" : "no_match");
+        if (!solved) return null;
 
         var recipe = match.Recipe;
         var title = Shorten($"Receita {recipe.Name}", MaxTitleLength);

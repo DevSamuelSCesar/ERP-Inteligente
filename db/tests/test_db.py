@@ -29,10 +29,12 @@ MIGRATION_004 = DB_DIR / "migrations" / "004_reservations.sql"
 MIGRATION_005 = DB_DIR / "migrations" / "005_skills.sql"
 MIGRATION_006 = DB_DIR / "migrations" / "006_memory.sql"
 MIGRATION_007 = DB_DIR / "migrations" / "007_recipes.sql"
+MIGRATION_008 = DB_DIR / "migrations" / "008_llm_usage.sql"
 V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
 V4_SCRIPTS = ("schema_v4.sql", "security_v4.sql", "seed_v4.sql")
 V5_SCRIPTS = ("schema_v5.sql", "security_v5.sql", "seed_v5.sql")
 V6_SCRIPTS = ("schema_v6.sql", "security_v6.sql", "seed_v6.sql")
+V7_SCRIPTS = ("schema_v7.sql", "security_v7.sql", "seed_v7.sql")
 # Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
 V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
 V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
@@ -460,6 +462,7 @@ class MigrationTo3Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -620,6 +623,7 @@ class MigrationTo4Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -668,6 +672,7 @@ class MigrationTo5Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -828,6 +833,7 @@ class MigrationTo6Tests(unittest.TestCase):
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -889,6 +895,7 @@ class MigrationTo7Tests(unittest.TestCase):
         for name in V6_SCRIPTS:
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -913,6 +920,71 @@ class MigrationTo7Tests(unittest.TestCase):
     def test_seeded_recipe_gets_the_new_values(self):
         self.assertSameRows("SELECT id, name, status, success_count, failure_count, skill, signature, example_params_json, "
                             "failure_streak, source_plan_id, promoted_by, created_at FROM recipes ORDER BY id")
+
+
+class MigrationTo8Tests(unittest.TestCase):
+    """A version 7 database upgraded by migrations/008 must match a fresh install (llm_usage and its guards)."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        self.migrated.execute("PRAGMA foreign_keys = ON")
+        for name in V7_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+
+    def test_usage_table_and_guards_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('llm_usage') ORDER BY cid")
+        self.assertSameRows("SELECT name, sql FROM sqlite_schema WHERE name IN ('llm_usage_by_time', "
+                            "'llm_usage_deny_update', 'llm_usage_deny_delete') ORDER BY name")
+
+
+class LlmUsageTests(DatabaseTestCase):
+    """llm_usage: append-only accounting, restricted values, never readable by the AI."""
+
+    def add(self, **kw):
+        row = {"occurred_at": "2026-11-11T10:00:00Z", "user_id": 1, "warehouse_id": 1, "role": "planner",
+               "provider": "claude", "model": "claude-sonnet-5-5", "calls": 3, "prompt_tokens": 12000,
+               "completion_tokens": 2000, "result": "proposals"}
+        row.update(kw)
+        cols = ", ".join(row)
+        return self.conn.execute(f"INSERT INTO llm_usage ({cols}) VALUES ({', '.join('?' * len(row))})",
+                                 tuple(row.values())).lastrowid
+
+    def test_usage_is_append_only(self):
+        uid = self.add()
+        self.assertDenied("UPDATE llm_usage SET prompt_tokens = 0 WHERE id = ?", (uid,))
+        self.assertDenied("DELETE FROM llm_usage WHERE id = ?", (uid,))
+
+    def test_values_are_restricted(self):
+        for kw in ({"role": "chat"}, {"provider": "gemini"}, {"prompt_tokens": -1}, {"result": "ok"}, {"model": ""}):
+            with self.subTest(kw=kw), self.assertRaises(sqlite3.IntegrityError):
+                self.add(**kw)
+        self.add(role="matcher", provider="local", model="nexus-matcher", result="no_match")
+
+    def test_ai_cannot_read_usage(self):
+        self.add()
+        self.conn.commit()
+        ai = sqlite3.connect(":memory:")
+        try:
+            self.conn.backup(ai)
+            ai.set_authorizer(ai_authorizer)
+            with self.assertRaises(sqlite3.DatabaseError):
+                ai.execute("SELECT model FROM llm_usage").fetchall()
+        finally:
+            ai.close()
 
 
 class RecipeTests(DatabaseTestCase):

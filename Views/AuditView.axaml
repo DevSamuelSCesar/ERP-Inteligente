@@ -5,19 +5,39 @@
              x:Class="erp_inteligente.Views.AuditView"
              x:DataType="vm:AuditViewModel">
 
-    <!-- Read-only query screen: filter, totals strip, DataGrid (references/UI.md, section 7) -->
-    <Grid RowDefinitions="Auto,Auto,*">
-        <TextBox Grid.Row="0" Width="400" HorizontalAlignment="Left"
-                 Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
-        <StackPanel Grid.Row="1" Margin="0,12,0,0">
+    <!-- Audit panel (feature 9): chain state, filters, totals strip, DataGrid (references/UI.md, section 7) -->
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" IsVisible="{Binding CanVerify}" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14" IsVisible="{Binding ChainIsValid}" />
+                <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14" IsVisible="{Binding ChainIsBroken}" />
+                <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14" IsVisible="{Binding IsVerifying}" />
+                <TextBlock Text="{Binding ChainStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="neutral" Command="{Binding VerifyCommand}"
+                    ToolTip.Tip="Recalcula os hashes de todos os registros (Alt+V)">
+                <AccessText Text="_Verificar cadeia" />
+            </Button>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
+            <TextBox Width="360" Text="{Binding FilterText}" PlaceholderText="{Binding FilterPlaceholder}" MaxLength="100" />
+            <ComboBox MinWidth="160" ItemsSource="{Binding Categories}" SelectedItem="{Binding SelectedCategory}" />
+            <CheckBox Content="Só negados e falhas" IsChecked="{Binding OnlyProblems}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Margin="0,12,0,0">
             <Rectangle Classes="rule" />
             <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
         </StackPanel>
-        <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}">
+
+        <DataGrid Grid.Row="3" ItemsSource="{Binding Rows}">
             <DataGrid.Columns>
                 <DataGridTextColumn x:DataType="m:AuditRow" Header="Data e hora" Binding="{Binding AtText}" Width="140" />
                 <DataGridTextColumn x:DataType="m:AuditRow" Header="Usuário" Binding="{Binding User}" Width="170" />
-                <DataGridTextColumn x:DataType="m:AuditRow" Header="Ação" Binding="{Binding Action}" Width="170" />
+                <DataGridTextColumn x:DataType="m:AuditRow" Header="Categoria" Binding="{Binding Category}" Width="120" />
+                <DataGridTextColumn x:DataType="m:AuditRow" Header="Ação" Binding="{Binding Action}" Width="190" />
+                <DataGridTextColumn x:DataType="m:AuditRow" Header="Resultado" Binding="{Binding OutcomeText}" Width="100" />
                 <DataGridTextColumn x:DataType="m:AuditRow" Header="Detalhe" Binding="{Binding Detail}" Width="*" />
             </DataGrid.Columns>
         </DataGrid>

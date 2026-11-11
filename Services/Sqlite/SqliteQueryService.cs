@@ -202,6 +202,8 @@ public sealed class SqliteQueryService(ApplicationDb db, ISessionService session
             user,
             SqliteFormat.AuditActionLabel(reader.GetString(2)),
             detail,
-            outcome == "denied");
+            outcome == "denied",
+            SqliteFormat.AuditCategory(reader.GetString(2)),
+            outcome == "failed");
     }
 }

@@ -25,8 +25,47 @@ internal static class SqliteFormat
         ["plan.execute"] = "Plano executado",
         ["plan.approve"] = "Plano aprovado",
         ["plan.reject"] = "Plano rejeitado",
+        ["plan.failed"] = "Plano falhou",
         ["stock.adjust"] = "Ajuste de estoque",
+        ["ai.tool"] = "Ferramenta do Nexus",
+        ["ai.context"] = "Contexto do Nexus",
+        ["ai.injection"] = "Instrução suspeita",
+        ["ai.recipe_match"] = "Reconhecimento de receita",
+        ["memory.create"] = "Memória criada",
+        ["memory.update"] = "Memória corrigida",
+        ["memory.archive"] = "Memória arquivada",
+        ["memory.reactivate"] = "Memória reativada",
+        ["memory.reinforce"] = "Memória reforçada",
+        ["memory.maintenance"] = "Manutenção de memórias",
+        ["skill.create"] = "Skill criada",
+        ["skill.update"] = "Skill alterada",
+        ["skill.archive"] = "Skill arquivada",
+        ["skill.reactivate"] = "Skill reativada",
+        ["recipe.candidate"] = "Receita candidata",
+        ["recipe.promote"] = "Receita promovida",
+        ["recipe.suspend"] = "Receita suspensa",
+        ["recipe.reactivate"] = "Receita reativada",
+        ["recipe.demote"] = "Receita despromovida",
+        ["llm.key.set"] = "Chave de IA salva",
+        ["llm.key.clear"] = "Chave de IA removida",
+        ["llm.model.set"] = "Modelo de IA alterado",
+        ["llm.local.port"] = "Porta do modelo local",
+        ["backup.create"] = "Backup",
+        ["backup.restore"] = "Restauração de backup",
     }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>The audit panel's categories, in display order.</summary>
+    internal static readonly string[] AuditCategories = ["Planos", "IA", "Segurança", "Conhecimento", "Sistema"];
+
+    /// <summary>Category of an <c>audit_log.action</c> (by its prefix).</summary>
+    internal static string AuditCategory(string action) => action.Split('.')[0] switch
+    {
+        "plan" or "stock" => "Planos",
+        "ai" => "IA",
+        "auth" or "policy" or "user" or "role" => "Segurança",
+        "memory" or "skill" or "recipe" => "Conhecimento",
+        _ => "Sistema",
+    };
 
     /// <summary>Parses a UTC timestamp such as <c>2026-10-20T10:01:00Z</c>.</summary>
     internal static DateTimeOffset ParseUtc(string text) =>

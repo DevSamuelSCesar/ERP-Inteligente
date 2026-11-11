@@ -23,6 +23,7 @@ public sealed class MigrationTests : IDisposable
     private static readonly string[] Version4Scripts = ["schema_v4.sql", "security_v4.sql", "seed_v4.sql"];
     private static readonly string[] Version5Scripts = ["schema_v5.sql", "security_v5.sql", "seed_v5.sql"];
     private static readonly string[] Version6Scripts = ["schema_v6.sql", "security_v6.sql", "seed_v6.sql"];
+    private static readonly string[] Version7Scripts = ["schema_v7.sql", "security_v7.sql", "seed_v7.sql"];
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "nexus-tests-" + Guid.NewGuid().ToString("N"));
     private readonly InMemorySecretStore _store = new();
@@ -76,9 +77,17 @@ public sealed class MigrationTests : IDisposable
         DatabaseBootstrapper.OpenOrCreate(path ?? _path, new KeyManager(_store));
 
     /// <summary>Checks what the current schema (version 7) must have: migrations/007_recipes.sql on top of the version 6 objects.</summary>
+    private static void AssertVersion8Schema(SqliteConnection c)
+    {
+        Assert.Equal(8L, Scalar(c, "PRAGMA user_version"));
+        Assert.Equal("id,occurred_at,user_id,warehouse_id,role,provider,model,calls,prompt_tokens,completion_tokens,result", ColumnList(c, "llm_usage"));
+        Assert.Equal(3L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE name IN ('llm_usage_by_time', 'llm_usage_deny_update', 'llm_usage_deny_delete')"));
+        AssertVersion7Schema(c);
+    }
+
+    /// <summary>Checks what migrations/007_recipes.sql must have produced on top of the version 6 objects.</summary>
     private static void AssertVersion7Schema(SqliteConnection c)
     {
-        Assert.Equal(7L, Scalar(c, "PRAGMA user_version"));
         Assert.EndsWith(",skill,signature,example_params_json,failure_streak,source_plan_id,promoted_by,created_at,promoted_at,last_used_at,status_reason",
             ColumnList(c, "recipes"));
         Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name = 'recipes_by_signature'"));
@@ -181,41 +190,41 @@ public sealed class MigrationTests : IDisposable
         using var db = Open();
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
     }
 
     [Fact]
-    public void Version_3_database_is_upgraded_to_7_with_the_reservation_backfill()
+    public void Version_3_database_is_upgraded_to_8_with_the_reservation_backfill()
     {
         var path = CreateLegacyDatabase("v3.db", 3, Version3Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_2_database_is_upgraded_to_7_and_keeps_its_data()
+    public void Version_2_database_is_upgraded_to_8_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v2.db", 2, Version2Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_4_database_is_upgraded_to_7_and_keeps_its_data()
+    public void Version_4_database_is_upgraded_to_8_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v4.db", 4, Version4Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM order_reservations"));
@@ -224,13 +233,13 @@ public sealed class MigrationTests : IDisposable
     }
 
     [Fact]
-    public void Version_5_database_is_upgraded_to_7_and_keeps_its_memories_and_search()
+    public void Version_5_database_is_upgraded_to_8_and_keeps_its_memories_and_search()
     {
         var path = CreateLegacyDatabase("v5.db", 5, Version5Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
@@ -238,13 +247,13 @@ public sealed class MigrationTests : IDisposable
     }
 
     [Fact]
-    public void Version_6_database_is_upgraded_to_7_and_keeps_its_recipe_plans_and_audit()
+    public void Version_6_database_is_upgraded_to_8_and_keeps_its_recipe_plans_and_audit()
     {
         var path = CreateLegacyDatabase("v6.db", 6, Version6Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion7Schema(c);
+        AssertVersion8Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM memories"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
@@ -254,6 +263,21 @@ public sealed class MigrationTests : IDisposable
             Exec(c, "UPDATE recipes SET plan_template_json = '{}' WHERE id = 1")).Message);
         Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
             Exec(c, "INSERT INTO role_permissions (role_id, permission, effect) VALUES (5, 'recipe.manage', 'ALLOW')")).Message);
+    }
+
+    [Fact]
+    public void Version_7_database_is_upgraded_to_8_and_usage_is_append_only()
+    {
+        var path = CreateLegacyDatabase("v7.db", 7, Version7Scripts);
+        using var db = Open(path);
+        using var c = db.OpenApplication();
+
+        AssertVersion8Schema(c);
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
+        Assert.True(AuditVerifier.Verify(c).IsValid);
+        Exec(c, "INSERT INTO llm_usage (occurred_at, role, provider, model, calls, prompt_tokens, completion_tokens, result) " +
+                "VALUES ('2026-11-11T10:00:00Z', 'planner', 'claude', 'claude-sonnet-5-5', 1, 10, 5, 'answer')");
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() => Exec(c, "DELETE FROM llm_usage")).Message);
     }
 
     [Fact]

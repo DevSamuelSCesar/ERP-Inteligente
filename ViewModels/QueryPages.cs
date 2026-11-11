@@ -120,19 +120,3 @@ public sealed class OrdersViewModel(IQueryService queries) : QueryPageViewModel<
     }
 }
 
-public sealed class AuditViewModel(IQueryService queries) : QueryPageViewModel<AuditRow>
-{
-    public override string Title => "Auditoria";
-    public override string FilterPlaceholder => "Filtrar por usuário, ação ou detalhe";
-
-    protected override Task<IReadOnlyList<AuditRow>> LoadAsync() => queries.GetAuditAsync();
-
-    protected override IEnumerable<string> SearchableText(AuditRow row) => [row.User, row.Action, row.Detail];
-
-    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<AuditRow> rows)
-    {
-        yield return new("Eventos", rows.Count.ToString());
-        yield return new("Planos executados", rows.Count(r => r.Action == "Plano executado").ToString());
-        yield return new("Eventos negados", rows.Count(r => r.IsDenied).ToString());
-    }
-}

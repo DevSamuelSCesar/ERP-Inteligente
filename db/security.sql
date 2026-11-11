@@ -253,3 +253,12 @@ FROM suppliers;
 CREATE VIEW v_customers_masked AS
 SELECT id, name, document_masked
 FROM customers;
+
+-- Usage is accounting: append-only, like the audit log (migrations/008_llm_usage.sql).
+CREATE TRIGGER llm_usage_deny_update BEFORE UPDATE ON llm_usage BEGIN
+    SELECT RAISE(ABORT, 'DENY: llm_usage is append-only');
+END;
+
+CREATE TRIGGER llm_usage_deny_delete BEFORE DELETE ON llm_usage BEGIN
+    SELECT RAISE(ABORT, 'DENY: llm_usage is append-only');
+END;

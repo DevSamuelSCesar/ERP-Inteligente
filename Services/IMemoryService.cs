@@ -21,4 +21,7 @@ public interface IMemoryService
     Task ArchiveAsync(long id);
 
     Task ReactivateAsync(long id);
+
+    /// <summary>Runs the maintenance job now (feature 9; <c>memory.manage</c>): duplicates, similar and stale memories are archived.</summary>
+    Task<MaintenanceReport> MaintainAsync() => throw new System.NotSupportedException();
 }

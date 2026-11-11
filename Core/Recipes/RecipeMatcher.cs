@@ -12,7 +12,8 @@ using erp_inteligente.Models;
 namespace erp_inteligente.Core.Recipes;
 
 /// <summary>A request recognised as a use of an active recipe: the recipe, the values extracted and the plan built.</summary>
-public sealed record RecipeMatch(RecipeRecord Recipe, JsonObject Parameters, string PlanJson);
+/// <param name="Choice">Provider and model that answered; <paramref name="Usage"/> its tokens (recorded by the caller, feature 9).</param>
+public sealed record RecipeMatch(RecipeRecord Recipe, JsonObject Parameters, string PlanJson, LlmChoice Choice, LlmUsage Usage);
 
 /// <summary>
 /// Recipe Matcher (references/ARQUITETURA.md, sections 4 and 7): before planning, one short call to the fast model only
@@ -21,7 +22,10 @@ public sealed record RecipeMatch(RecipeRecord Recipe, JsonObject Parameters, str
 /// plan still goes through the engine. Any doubt returns null and the normal Planner runs.
 /// </summary>
 /// <param name="settings">The model of the Matcher role (feature 8); without it, DeepSeek's fast model.</param>
-public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditLog audit, LlmSettings? settings = null)
+/// <param name="usage">Records the tokens of a call that found no usable recipe (feature 9); a match is recorded by the caller,
+/// which knows whether the recipe's plan passed the simulation.</param>
+public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditLog audit, LlmSettings? settings = null,
+    Operations.LlmUsageLog? usage = null)
 {
     public const int MaxTokens = 600;
     public const int MaxCandidates = 20;
@@ -52,15 +56,16 @@ public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditL
         if (candidates.Count == 0) return null; // no LLM call for "oi" or a request unrelated to any recipe
 
         LlmResponse response;
+        var choice = settings?.ChoiceFor(LlmUseRole.Matcher) ?? new LlmChoice(LlmProviderKind.DeepSeek, LlmSettings.FastModel);
         try
         {
-            var choice = settings?.ChoiceFor(LlmUseRole.Matcher) ?? new LlmChoice(LlmProviderKind.DeepSeek, LlmSettings.FastModel);
             response = await llm.CompleteAsync(new LlmRequest(choice.Model,
                 [LlmMessage.System(SystemPrompt + "\n\n" + Catalog(candidates)), LlmMessage.User(request)], [], MaxTokens,
                 Provider: choice.Provider), ct);
         }
         catch (LlmException)
         {
+            RecordUsage(user, choice, new LlmUsage(0, 0), "failed");
             return null; // the Planner reports the provider problem itself
         }
 
@@ -68,17 +73,24 @@ public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditL
         if (recipe is null || parameters is null)
         {
             Audit(aiUserId, user, "none", AuditOutcome.Allowed, "no_match");
+            RecordUsage(user, choice, response.Usage, "no_match");
             return null;
         }
         var instance = RecipeTemplate.Instantiate(recipe, parameters);
         if (!instance.IsValid)
         {
             Audit(aiUserId, user, Target(recipe), AuditOutcome.Denied, "invalid_parameters");
+            RecordUsage(user, choice, response.Usage, "no_match");
             return null;
         }
         Audit(aiUserId, user, Target(recipe), AuditOutcome.Allowed, "matched");
-        return new RecipeMatch(recipe, parameters, instance.PlanJson!);
+        return new RecipeMatch(recipe, parameters, instance.PlanJson!, choice, response.Usage);
     }
+
+    /// <summary>Records one Matcher call: <c>recipe</c> when it solved the request, otherwise <c>no_match</c> or <c>failed</c>.</summary>
+    public void RecordUsage(UserSession user, LlmChoice choice, LlmUsage tokens, string result) =>
+        usage?.Record(user, new Operations.LlmUsageEntry(LlmUseRole.Matcher, choice, 1, tokens.PromptTokens, tokens.CompletionTokens, result));
+
 
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {

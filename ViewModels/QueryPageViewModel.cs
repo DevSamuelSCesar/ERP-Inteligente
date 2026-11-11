@@ -38,12 +38,19 @@ public abstract partial class QueryPageViewModel<TRow> : PageViewModel
 
     protected abstract IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<TRow> rows);
 
+    /// <summary>Extra filters of a screen (besides the text); all rows by default.</summary>
+    protected virtual bool Include(TRow row) => true;
+
+    /// <summary>Applies the filters again after a screen-specific filter changed.</summary>
+    protected void Refilter() => ApplyFilter();
+
     private void ApplyFilter()
     {
         var filter = FilterText.Trim();
-        IReadOnlyList<TRow> rows = filter.Length == 0
-            ? _all
-            : _all.Where(r => SearchableText(r).Any(t => t.Contains(filter, StringComparison.CurrentCultureIgnoreCase))).ToList();
+        IReadOnlyList<TRow> rows = _all
+            .Where(Include)
+            .Where(r => filter.Length == 0 || SearchableText(r).Any(t => t.Contains(filter, StringComparison.CurrentCultureIgnoreCase)))
+            .ToList();
 
         Rows.Clear();
         foreach (var row in rows)

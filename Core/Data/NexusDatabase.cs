@@ -39,6 +39,34 @@ public sealed class NexusDatabase : IDisposable
     /// <summary>Read-only connection for the AI, restricted by <see cref="AiAuthorizer"/>. Never begin transactions on it.</summary>
     public SqliteConnection OpenAiReadOnly() => Open(SqliteOpenMode.ReadOnly, foreignKeys: false, ai: true);
 
+    /// <summary>
+    /// Opens another file with this database's SQLCipher key (backups, feature 9): the SQLite backup API copies pages,
+    /// so source and copy must share the key, and the copy stays encrypted. No schema check; foreign keys off.
+    /// </summary>
+    /// <param name="create">Creates the file when missing (a new backup); otherwise it must exist.</param>
+    public SqliteConnection OpenWithSameKey(string path, bool create)
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = System.IO.Path.GetFullPath(path),
+            Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
+            Pooling = false,
+        }.ToString());
+        try
+        {
+            connection.Open();
+            ApplyKey(connection, _keys.SqlCipherKey);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
     public ColumnCipher CreateColumnCipher()
     {
         ThrowIfDisposed();

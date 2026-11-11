@@ -88,8 +88,23 @@ Adaptadores Claude e OpenAI (a DeepSeek entrou na feature 3), modelo por papel c
   - O Matcher aceita o formato de resposta do conjunto (`{intent, recipe, params}`).
 - **Pendente:** rodar o treino (precisa de GPU) e a linha de base (precisa da chave da Anthropic), e registrar os números no `IA.md`.
 
-### 9. Operação
+### 9. Operação ✅
 Backup criptografado pela API do SQLite, job de manutenção de memórias, painel de auditoria e de custos de tokens, e instaladores por plataforma.
+*Estado:* concluída em 2026-11-11.
+- **Backup (`Core/Operations/BackupService`):**
+  - a API de backup do SQLite copia o banco aberto para `backups/`, ao lado dele, com a mesma chave do SQLCipher, então a cópia continua criptografada;
+  - um backup automático por dia na abertura do app, e ficam os 7 mais recentes;
+  - o administrador faz e restaura backups em Configurações. A restauração confere chave, versão, integridade e cadeia de auditoria, salva antes o estado atual e registra a restauração na auditoria.
+- **Manutenção de memórias (`Core/Memory/MemoryMaintenance`):** uma vez por dia, ou pelo botão do supervisor em Memórias, arquiva:
+  - memórias repetidas;
+  - parecidas (≥ 80% das palavras em comum, mesmo tipo e escopo);
+  - sem uso: da IA, nunca usadas, depois de 30 dias; da IA ou do sistema, paradas há 180 dias.
+  - As do supervisor nunca são arquivadas pelo job, e nada é apagado.
+- **Consumo de tokens:** migração 008, tabela `llm_usage`, só inserção. O Planner e o Matcher gravam uma linha por pedido, com provedor, modelo, chamadas e tokens, nunca o texto.
+- **Telas (`audit.read`):**
+  - **Auditoria:** filtros por categoria e por problemas, mais a verificação da cadeia;
+  - **Custos de IA:** pedidos, % resolvida por receita, tokens por pedido e custo estimado por papel e modelo, com os preços do `IA.md`.
+- **Instaladores (`installer/`):** build *self-contained* de arquivo único para Windows (zip e instalador Inno Setup por usuário) e Linux (tar.gz com `install.sh` e atalho). macOS fica de fora até o Keychain ser suportado.
 
 ## Resumo
 

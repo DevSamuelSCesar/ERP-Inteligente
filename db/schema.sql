@@ -368,3 +368,24 @@ CREATE TABLE audit_log (
     prev_hash    TEXT NOT NULL,
     hash         TEXT NOT NULL UNIQUE
 ) STRICT;
+
+-- ---------------------------------------------------------------------------
+-- Token usage of the LLM requests (feature 9, migrations/008_llm_usage.sql)
+-- ---------------------------------------------------------------------------
+
+-- One row per request and role: tokens summed over the calls of that request, never the text.
+CREATE TABLE llm_usage (
+    id                INTEGER PRIMARY KEY,
+    occurred_at       TEXT NOT NULL,
+    user_id           INTEGER REFERENCES users (id),
+    warehouse_id      INTEGER REFERENCES warehouses (id),
+    role              TEXT NOT NULL CHECK (role IN ('planner', 'matcher')),
+    provider          TEXT NOT NULL CHECK (provider IN ('deepseek', 'claude', 'openai', 'local')),
+    model             TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 80),
+    calls             INTEGER NOT NULL CHECK (calls >= 0),
+    prompt_tokens     INTEGER NOT NULL CHECK (prompt_tokens >= 0),
+    completion_tokens INTEGER NOT NULL CHECK (completion_tokens >= 0),
+    result            TEXT NOT NULL CHECK (result IN ('answer', 'proposals', 'recipe', 'no_match', 'escalated', 'failed'))
+) STRICT;
+
+CREATE INDEX llm_usage_by_time ON llm_usage (occurred_at);

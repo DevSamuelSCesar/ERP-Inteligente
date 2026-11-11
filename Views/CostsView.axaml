@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:erp_inteligente.ViewModels"
+             x:Class="erp_inteligente.Views.CostsView"
+             x:DataType="vm:CostsViewModel">
+
+    <!-- Custos de IA (feature 9): period, totals strip, table per role / provider / model -->
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <ComboBox Grid.Row="0" MinWidth="200" ItemsSource="{Binding Periods}" SelectedItem="{Binding SelectedPeriod}" />
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" IsVisible="{Binding HasError}">
+            <PathIcon Classes="error" Data="{StaticResource Icon.Error}" Width="14" Height="14" />
+            <TextBlock Text="{Binding Error}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Margin="0,12,0,0">
+            <Rectangle Classes="rule" />
+            <ItemsControl Classes="totals" ItemsSource="{Binding Totals}" />
+        </StackPanel>
+
+        <Panel Grid.Row="3">
+            <DataGrid ItemsSource="{Binding Lines}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Papel" Binding="{Binding Role}" Width="130" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Provedor" Binding="{Binding Provider}" Width="160" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Modelo" Binding="{Binding Model}" Width="180" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Pedidos" Binding="{Binding Requests}" Width="90" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Chamadas" Binding="{Binding Calls}" Width="90" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Tokens (entrada / saída)" Binding="{Binding Tokens}" Width="*" />
+                    <DataGridTextColumn x:DataType="vm:UsageLineRow" Header="Custo estimado" Binding="{Binding Cost}" Width="150" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock Classes="secondary" Margin="0,40,0,0" HorizontalAlignment="Center" IsVisible="{Binding IsEmpty}"
+                       Text="Nenhum uso de IA no período." />
+        </Panel>
+
+        <TextBlock Grid.Row="4" Classes="secondary" Margin="0,10,0,0" Text="{Binding Note}" TextWrapping="Wrap" />
+    </Grid>
+</UserControl>

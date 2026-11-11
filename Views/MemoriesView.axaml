@@ -11,12 +11,16 @@
 
     <!-- Memórias (references/UI.md, section 7.2): table on top, detail or editor below -->
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
             <RadioButton Classes="tab" GroupName="MemoryTabs" Content="Ativas" IsChecked="{Binding ShowActive}" />
             <RadioButton Grid.Column="1" Classes="tab" GroupName="MemoryTabs" Content="Arquivadas" IsChecked="{Binding ShowArchived}" />
             <TextBox Grid.Column="2" Width="320" HorizontalAlignment="Left" Margin="16,0,0,0"
                      Text="{Binding FilterText}" PlaceholderText="Filtrar por texto ou escopo" MaxLength="100" />
-            <Button Grid.Column="3" Classes="neutral" Command="{Binding NewMemoryCommand}" IsVisible="{Binding CanManage}"
+            <Button Grid.Column="3" Classes="neutral" Margin="0,0,8,0" Command="{Binding MaintainCommand}" IsVisible="{Binding CanManage}"
+                    ToolTip.Tip="Arquiva memórias repetidas, parecidas ou sem uso (Alt+M); também roda uma vez por dia">
+                <AccessText Text="_Manutenção" />
+            </Button>
+            <Button Grid.Column="4" Classes="neutral" Command="{Binding NewMemoryCommand}" IsVisible="{Binding CanManage}"
                     ToolTip.Tip="Escrever uma memória do armazém (Alt+N)">
                 <AccessText Text="_Nova memória" />
             </Button>

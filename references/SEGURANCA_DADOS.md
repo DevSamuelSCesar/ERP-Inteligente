@@ -257,6 +257,9 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 | Dado hostil fechando o bloco `<dados>` | `PlannerTests` (C#) | Automatizado ✅ |
 | Plano da IA com operação fora do direito IA ∩ usuário (ajuste por um supervisor) | `PlanEngineTests` e `PlannerTests` (C#) | Automatizado ✅ |
 | Chave de API em mensagens de erro ou na auditoria | `DeepSeekProviderTests` e `SettingsViewModelTests` (C#) | Automatizado ✅ |
+| Backup: cópia legível sem a chave, backup de outra máquina (outra chave), nome de arquivo com `../`, cadeia de auditoria adulterada no backup, backup ou restauração por quem não é administrador | `BackupServiceTests` e `OperationsViewModelTests` (C#) | Automatizado ✅ |
+| Consumo de tokens: alteração ou exclusão de `llm_usage`, valores fora da lista, leitura pela IA, relatório sem `audit.read` | `LlmUsageTests` e `MigrationTests` (C#); `LlmUsageTests` e `MigrationTo8Tests` (Python) | Automatizado ✅ |
+| Manutenção de memórias: arquivar memória do supervisor, apagar em vez de arquivar, texto da memória na auditoria, execução por quem não é supervisor | `MemoryMaintenanceTests` (C#) | Automatizado ✅ |
 | Multi-provedor: chave do Claude/OpenAI em erros (401, 403, 429, 529, 400), chave de um provedor usada por outro, modelo local fora de `127.0.0.1` ou com chave, modelo local no planejamento, troca de modelo por quem não é administrador | `MultiProviderTests`, `ModelPerRoleTests` e `SettingsViewModelTests` (C#) | Automatizado ✅ |
 | CPF, CNPJ, e-mail, telefone, chave ou senha chegando à auditoria (mascarados antes do hash, cadeia válida) | `SensitiveDataRedactorTests` (C#) | Automatizado ✅ |
 | Dado hostil marcado, auditado como `ai.injection` e avisado; mensagens próprias e argumentos ecoados não são examinados | `InjectionDefenseTests` e `InjectionDetectorTests` (C#) | Automatizado ✅ |
@@ -264,6 +267,6 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 | Receitas: IA ou operador promovendo, descrição com instrução, parâmetro com SQL ou campo extra, receita fora das oferecidas pelo Matcher, pedido suspeito usando o atalho, apagar ou alterar o modelo | `RecipeStoreTests`, `RecipeTemplateTests`, `RecipeMatcherTests` e `RecipesViewModelTests` (C#); `RecipeTests` e `MigrationTo7Tests` (Python) | Automatizado ✅ |
 
 ```bash
-python3 -m unittest discover -s db/tests -v   # 103 testes
-dotnet test tests/Nexus.Tests                 # 1342 testes do app
+python3 -m unittest discover -s db/tests -v   # 108 testes
+dotnet test tests/Nexus.Tests                 # 1368 testes do app
 ```

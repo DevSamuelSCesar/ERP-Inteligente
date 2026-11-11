@@ -42,8 +42,24 @@ public sealed partial class Planner(
     MemoryStore? memories = null,
     MemoryRetriever? memoryRetriever = null,
     KnowledgeRetriever? knowledge = null,
-    RecipeMatcher? recipeMatcher = null)
+    RecipeMatcher? recipeMatcher = null,
+    Operations.LlmUsageLog? usage = null)
 {
+    /// <summary>One <c>llm_usage</c> row per request that called the planning model (feature 9).</summary>
+    private void RecordUsage(UserSession user, RunState state, PlannerResult result)
+    {
+        if (usage is null || state.Calls == 0) return;
+        var kind = result switch
+        {
+            PlannerAnswer => "answer",
+            PlannerProposals => "proposals",
+            PlannerEscalated => "escalated",
+            _ => "failed",
+        };
+        usage.Record(user, new Operations.LlmUsageEntry(LlmUseRole.Planner, settings.ChoiceFor(LlmUseRole.Planner),
+            state.Calls, state.PromptTokens, state.CompletionTokens, kind));
+    }
+
     internal const string ProposePlan = "propose_plan";
     internal const string OfferOptions = "offer_options";
     internal const string ProposeSkill = "propose_skill";
@@ -90,6 +106,17 @@ public sealed partial class Planner(
         public List<RememberedMemory> Remembered { get; } = [];
         public List<SuspiciousContent> Suspicious { get; } = [];
         public bool HasResult => Proposals.Count > 0 || Skill is not null;
+
+        /// <summary>Calls and tokens of the planning model in this request (feature 9: cost panel).</summary>
+        public int Calls { get; set; }
+        public int PromptTokens { get; set; }
+        public int CompletionTokens { get; set; }
+
+        public void Count(LlmResponse response)
+        {
+            PromptTokens += Math.Max(0, response.Usage.PromptTokens);
+            CompletionTokens += Math.Max(0, response.Usage.CompletionTokens);
+        }
     }
 
     public Task<(PlannerResult Result, PlannerTurn? Turn)> RunAsync(
@@ -162,9 +189,12 @@ public sealed partial class Planner(
         var tokens = 0;
         status.Report("Planejando");
 
-        // Every result carries what the injection scan found, whatever the way out.
-        (PlannerResult, PlannerTurn?) Flag((PlannerResult Result, PlannerTurn? Turn) outcome) =>
-            (outcome.Result with { Suspicious = state.Suspicious.ToArray() }, outcome.Turn);
+        // Every result carries what the injection scan found, whatever the way out, and its token usage is recorded.
+        (PlannerResult, PlannerTurn?) Flag((PlannerResult Result, PlannerTurn? Turn) outcome)
+        {
+            RecordUsage(user, state, outcome.Result);
+            return (outcome.Result with { Suspicious = state.Suspicious.ToArray() }, outcome.Turn);
+        }
 
         // With valid proposals in hand a limit never throws them away: the operator gets what was prepared.
         (PlannerResult, PlannerTurn?) Limit(PlannerEscalated escalated) =>
@@ -178,8 +208,10 @@ public sealed partial class Planner(
             LlmResponse response;
             try
             {
+                state.Calls++;
                 response = await llm.CompleteAsync(
                     PlannerRequest(messages.ToArray(), tools), ct);
+                state.Count(response);
             }
             catch (LlmException ex)
             {
@@ -247,8 +279,10 @@ public sealed partial class Planner(
         {
             try
             {
+                state.Calls++;
                 var response = await llm.CompleteAsync(
                     PlannerRequest(messages.ToArray(), []), ct);
+                state.Count(response);
                 if (response.ToolCalls.Count == 0 && CleanText(response.Content) is { Length: > 0 } cleaned)
                 {
                     text = cleaned;
