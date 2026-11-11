@@ -4,10 +4,17 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using erp_inteligente.Models;
 using erp_inteligente.Services;
 
 namespace erp_inteligente.ViewModels;
+
+/// <summary>
+/// Asks the shell of the same session (<see cref="Plans"/> is that session's service) to open a plan in the Planos screen
+/// (references/UI.md, section 6: the summary links to the plan).
+/// </summary>
+public sealed record OpenPlanMessage(int PlanId, IPlanService Plans);
 
 /// <summary>A plan step formatted for the board's tabular lines.</summary>
 public sealed record PlanStepLine(string Operation, string Quantity, string Sku, string From, string To, string Note);
@@ -23,8 +30,11 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
     private readonly IPlanService _plans;
     private readonly IDialogService _dialogs;
 
-    public PlanBoardViewModel(Plan plan, UserSession user, IPlanService plans, IDialogService dialogs)
+    /// <param name="linkToPlans">False inside the Planos screen itself, where the link would lead back to the same board.</param>
+    public PlanBoardViewModel(Plan plan, UserSession user, IPlanService plans, IDialogService dialogs, bool linkToPlans = true)
     {
+        ShowPlanLink = linkToPlans
+            && (user.Has(Permissions.PlanSubmit) || user.Has(Permissions.PlanApprove) || user.Has(Permissions.AuditRead));
         _plan = plan;
         _user = user;
         _plans = plans;
@@ -40,6 +50,16 @@ public sealed partial class PlanBoardViewModel : ViewModelBase, IDisposable
     public bool IsCritical => _plan.Risk == PlanRisk.Critical;
     public string RiskText => IsCritical ? "Crítico" : "Reversível";
     public IReadOnlyList<PlanStepLine> Steps { get; }
+
+    /// <summary>The "Ver em Planos" link; shown where the board is not already in the Planos screen.</summary>
+    public bool ShowPlanLink { get; }
+
+    [RelayCommand]
+    private void OpenInPlans()
+    {
+        if (ShowPlanLink)
+            WeakReferenceMessenger.Default.Send(new OpenPlanMessage(_plan.Id, _plans));
+    }
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AcceptCommand), nameof(RejectCommand))]

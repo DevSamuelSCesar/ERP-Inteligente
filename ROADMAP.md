@@ -46,7 +46,10 @@ Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; 
 *Estado:* concluída em 2026-11-08, com BM25 apenas.
 - Memórias por armazém, com status, origem e autor (migração 006). A IA grava pelo filtro (`remember`), e a rejeição de um plano da IA vira uma correção. Só o supervisor (`memory.manage`) cria, corrige e arquiva, na tela Memórias.
 - `knowledge/` é indexado na abertura. Memórias e trechos relevantes entram no pedido como dados delimitados, e há as ferramentas `search_knowledge` e `search_memories`.
-- **Pendente:** embeddings, `sqlite-vec` e a busca híbrida com RRF (decisão de usar só BM25 por enquanto); o job de manutenção de memórias continua na feature 9.
+- **Confiança pelos resultados (2026-11-11, `Core/Memory/MemoryFeedback`):** as memórias que a IA tinha à frente ao propor um plano ficam registradas com ele (na auditoria `plan.submit`). Plano executado: +0,05 em cada uma. Plano rejeitado pelo supervisor: −0,15, o que tira de uso uma memória nova da IA (o contexto só usa confiança ≥ 0,3) até ela ser reforçada.
+- **Memórias de erros recorrentes (2026-11-11):** o mesmo código de erro 3 vezes em 30 dias no armazém (proposta recusada pelo validador no Planner ou plano que falhou) vira uma memória `pattern` de origem `system`, uma por código.
+- O job de manutenção de memórias foi feito na feature 9.
+- **Pendente:** embeddings, `sqlite-vec` e a busca híbrida com RRF (decisão de usar só BM25 por enquanto).
 
 ## Segurança e economia
 
@@ -68,7 +71,7 @@ Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com mod
 - **Recipe Matcher:** antes do Planner, uma chamada ao `deepseek-flash`, sem ferramentas, escolhe a receita e extrai os valores. Ela só acontece quando o pedido tem um valor e uma palavra em comum com alguma receita ativa, e nunca para pedido suspeito de injeção. Na dúvida, segue o Planner normal. O Planner também ganhou `search_recipes`.
 - **Invalidação:** a receita é suspensa quando muda a versão da DSL ou da skill, e o supervisor a reativa revalidando os valores de exemplo. 3 falhas seguidas (rejeição conta) despromovem a receita.
 - Migração 007 (schema na versão 7).
-- **Pendente:** modelo por papel configurável e o fine-tuning do Matcher continuam na feature 8.
+- O modelo por papel configurável e o experimento de fine-tuning do Matcher foram feitos na feature 8.
 
 ## Evolução
 
@@ -104,6 +107,7 @@ Backup criptografado pela API do SQLite, job de manutenção de memórias, paine
 - **Telas (`audit.read`):**
   - **Auditoria:** filtros por categoria e por problemas, mais a verificação da cadeia;
   - **Custos de IA:** pedidos, % resolvida por receita, tokens por pedido e custo estimado por papel e modelo, com os preços do `IA.md`.
+- **Link para o plano (2026-11-11):** o quadro do plano no Nexus, em Novo plano e em Receitas tem "Ver plano N em Planos", que abre a tela Planos com o plano selecionado (`UI.md`, seção 6).
 - **Instaladores (`installer/`):** build *self-contained* de arquivo único para Windows (zip e instalador Inno Setup por usuário) e Linux (tar.gz com `install.sh` e atalho). macOS fica de fora até o Keychain ser suportado.
 
 ## Resumo

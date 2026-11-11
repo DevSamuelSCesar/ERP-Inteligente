@@ -105,7 +105,7 @@ public sealed class EnginePlanService(PlanEngine engine, ApplicationDb db, ISess
     {
         ArgumentNullException.ThrowIfNull(draft);
         var user = session.Current;
-        var submission = await Task.Run(() => engine.Submit(user, draft.Json, PlannedBy(draft), draft.RecipeId));
+        var submission = await Task.Run(() => engine.Submit(user, draft.Json, PlannedBy(draft), draft.RecipeId, draft.MemoryIds));
         if (submission.PlanId is not { } id)
             throw new ArgumentException(Messages(submission.Errors), nameof(draft));
 

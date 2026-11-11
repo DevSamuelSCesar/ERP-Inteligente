@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using erp_inteligente.Core.Audit;
 using erp_inteligente.Models;
 using erp_inteligente.Services;
@@ -53,6 +54,7 @@ public sealed partial class ShellViewModel : ViewModelBase
             new NavigationItem[] { new("Configurações", "Settings", () => new SettingsViewModel(_user, databaseDescription, llm, operations)) }.Where(IsAllowed));
 
         _plansItem = MenuItems.FirstOrDefault(i => i.IconKey == "Plans");
+        WeakReferenceMessenger.Default.Register<ShellViewModel, OpenPlanMessage>(this, static (shell, message) => _ = shell.OpenPlanAsync(message));
         _plans.PlanChanged += (_, _) => UpdatePendingBadge();
         _ = RefreshPendingBadgeAsync();
 
@@ -92,6 +94,23 @@ public sealed partial class ShellViewModel : ViewModelBase
 
         CurrentPage = item.Page;
         return item.Page.OnActivatedAsync();
+    }
+
+    /// <summary>The link of a plan board: Planos with the plan selected. Boards of other sessions are ignored.</summary>
+    internal async Task OpenPlanAsync(OpenPlanMessage message)
+    {
+        if (!ReferenceEquals(message.Plans, _plans) || _plansItem is null)
+            return;
+        try
+        {
+            await NavigateAsync(_plansItem);
+            (_plansItem.Page as PlansViewModel)?.SelectPlan(message.PlanId);
+        }
+        catch (Exception ex)
+        {
+            // The Planos screen reports its own load errors.
+            System.Diagnostics.Trace.TraceWarning("Opening plan failed: {0}", ex.GetType().Name);
+        }
     }
 
     [RelayCommand]

@@ -129,7 +129,7 @@ Memórias e trechos de procedimento entram no contexto da IA. Uma memória malic
 
 1. **Filtro na gravação (`MemoryFilter`):** até 1.000 caracteres; recusa CPF, CNPJ completo, e-mail e telefone; recusa texto com cara de instrução ao modelo (pt e en); remove caracteres de controle, de largura zero e bidirecionais. Vale para a IA, para o sistema e para o supervisor.
 2. **Dados, não ordens:** tudo entra em `<dados>` com `<` e `>` escapados, e o prompt manda tratar como referência; os dados das ferramentas valem mais que as memórias.
-3. **Confiança baixa:** memórias da IA começam em 0,3; só sobem se repetidas, e o supervisor arquiva o que estiver errado.
+3. **Confiança baixa:** memórias da IA começam em 0,3; só sobem se repetidas ou se o plano em que foram usadas for executado (+0,05), caem 0,15 quando o supervisor rejeita esse plano (e saem do contexto abaixo de 0,3), e o supervisor arquiva o que estiver errado. Memórias de erros recorrentes levam a mensagem do validador, nunca o texto do modelo.
 4. **Isolamento:** toda leitura e escrita é filtrada pelo armazém da sessão; a IA não lê as tabelas diretamente.
 5. **Rastreabilidade:** cada gravação, reforço, correção e arquivamento é auditado sem o conteúdo, e o contexto injetado é auditado (`ai.context`) com ids e caminhos.
 
@@ -268,5 +268,5 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 
 ```bash
 python3 -m unittest discover -s db/tests -v   # 108 testes
-dotnet test tests/Nexus.Tests                 # 1368 testes do app
+dotnet test tests/Nexus.Tests                 # 1377 testes do app
 ```

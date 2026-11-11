@@ -7,6 +7,7 @@ using erp_inteligente.Core.Planner;
 using erp_inteligente.Models;
 using erp_inteligente.Services;
 using erp_inteligente.Services.Sqlite;
+using Nexus.Tests.Core.Engine;
 using Nexus.Tests.Core.Policy;
 using Nexus.Tests.Services;
 using PlannerClass = erp_inteligente.Core.Planner.Planner;
@@ -41,7 +42,12 @@ public sealed class MemoryContextTests : IDisposable
             new PlanEngine(_f.Db.Database, _f.Policy, _f.Audit, _f.Time),
             memories: features ? _store : null,
             memoryRetriever: features ? new MemoryRetriever(_f.Db.Database, _f.Policy) : null,
-            knowledge: features ? new KnowledgeRetriever(_f.Db.Database) : null);
+            knowledge: features ? new KnowledgeRetriever(_f.Db.Database) : null,
+            feedback: features ? new MemoryFeedback(_f.Db.Database, _store, _f.Audit, _f.Time) : null);
+
+    private static string PlanArgs(string to) =>
+        "{\"title\":\"Guardar\",\"rationale\":\"Atende ao pedido.\",\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\"," +
+        "\"skill\":\"armazenagem\",\"steps\":[" + EngineHarness.Move("ABC-123", 1, "DOCA-01", to) + "]}}";
 
     private sealed class Status : IProgress<string>
     {
@@ -505,5 +511,37 @@ public sealed class MemoryContextTests : IDisposable
         using var app = new Nexus.Tests.TestApp();
         Assert.NotNull(app.Host.MemoryStore);
         Assert.NotEmpty(app.Host.KnowledgeRetriever.Search("armazenagem refrigerado"));
+    }
+
+    // ---- feedback from the plans (section 8) ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Proposal_carries_the_memories_the_model_had_in_front_of_it()
+    {
+        var seeded = _store.List(_maria).Single(m => m.Content.Contains("Produtos refrigerados (ALI-*)", StringComparison.Ordinal)).Id;
+        _llm.Enqueue(Calls(Call("propose_plan", PlanArgs("A-02-01")))).Enqueue(Text("pronto"));
+
+        var (result, _) = await Run(NewPlanner(), _joao, Refrigerated);
+
+        var item = Assert.Single(Assert.IsType<PlannerProposals>(result).Items);
+        Assert.Contains(seeded, item.Draft.MemoryIds);
+    }
+
+    [Fact]
+    public async Task Recurring_invalid_proposals_become_a_pattern_memory()
+    {
+        for (var i = 0; i < MemoryFeedback.RecurrenceThreshold; i++)
+        {
+            _llm.Enqueue(Calls(Call("propose_plan", PlanArgs("Q-99-99")))).Enqueue(Text("não deu"));
+            await Run(NewPlanner(), _joao, "mova o ABC-123");
+        }
+
+        Assert.Equal(MemoryFeedback.RecurrenceThreshold, Count(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'ai.tool' AND outcome = 'denied' AND json_array_length(details_json, '$.errors') > 0"));
+        var memory = Assert.Single(_store.List(_maria), m => m.Content.StartsWith("Erro recorrente (", StringComparison.Ordinal));
+        Assert.Equal(MemoryKind.Pattern, memory.Kind);
+        Assert.Equal(MemoryOrigin.System, memory.Origin);
+        Assert.Equal("armazenagem", memory.ScopeRef);
+        Assert.DoesNotContain("Q-99-99\"", memory.Content); // the error message, never the model's JSON
     }
 }

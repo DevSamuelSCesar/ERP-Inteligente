@@ -218,7 +218,7 @@ Elementos:
 
 - **Faixa de totais** no topo: uma linha de pares rótulo/valor (quantidade movimentada, endereços afetados, SKUs afetados, risco), com algarismos tabulares.
 - **Visualização por operação**, conforme a tabela abaixo.
-- Um **link para o plano** na tela Planos/Auditoria.
+- Um **link para o plano** na tela Planos/Auditoria. Estado: o quadro mostra "Ver plano N em Planos" (botão neutro), que abre a tela Planos com o plano selecionado, saindo da aba de pendentes quando preciso. Dentro da própria tela Planos o link não aparece.
 
 | Operação | Visualização |
 |----------|--------------|

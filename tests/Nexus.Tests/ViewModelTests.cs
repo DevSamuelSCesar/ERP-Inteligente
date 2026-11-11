@@ -283,6 +283,26 @@ public class ViewModelTests
     }
 
     [Fact]
+    public void Plan_link_opens_the_plan_in_the_plans_screen_of_the_same_session()
+    {
+        var w = new DemoWorld();
+        var shell = Shell(w, DemoSessionService.Supervisor);
+        var otherShell = Shell(new DemoWorld(), DemoSessionService.Supervisor);
+        var executed = w.Plans.Plans.First(p => p.Status != PlanStatus.PendingApproval);
+        var board = new PlanBoardViewModel(executed, DemoSessionService.Supervisor, w.Plans, new FakeDialogService());
+        Assert.True(board.ShowPlanLink);
+
+        board.OpenInPlansCommand.Execute(null);
+
+        var plans = Assert.IsType<PlansViewModel>(shell.CurrentPage);
+        Assert.True(plans.ShowAll); // the plan is not pending, so the screen leaves the pending tab
+        Assert.Equal(executed.Id, plans.SelectedRow!.Plan.Id);
+        Assert.True(shell.MenuItems.Single(i => i.Label == "Planos").IsActive);
+        Assert.IsType<NexusViewModel>(otherShell.CurrentPage); // another session's shell ignores the link
+        Assert.False(plans.SelectedBoard!.ShowPlanLink); // no link back to the same screen
+    }
+
+    [Fact]
     public async Task Rejecting_asks_for_a_reason_and_cancel_keeps_plan_pending()
     {
         var w = new DemoWorld();

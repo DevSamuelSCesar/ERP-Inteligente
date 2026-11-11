@@ -53,13 +53,22 @@ public sealed partial class PlansViewModel : PageViewModel
     partial void OnSelectedRowChanged(PlanRow? value)
     {
         SelectedBoard?.Dispose();
-        SelectedBoard = value is null ? null : new PlanBoardViewModel(value.Plan, _user, _plans, _dialogs);
+        SelectedBoard = value is null ? null : new PlanBoardViewModel(value.Plan, _user, _plans, _dialogs, linkToPlans: false);
     }
 
     public override async Task OnActivatedAsync()
     {
         await _plans.RefreshAsync();
         Reload();
+    }
+
+    /// <summary>Selects a plan opened from a board elsewhere; leaves the pending tab when the plan is not pending.</summary>
+    public void SelectPlan(int planId)
+    {
+        if (ShowPendingOnly && Rows.All(r => r.Plan.Id != planId))
+            ShowPendingOnly = false;
+        if (Rows.FirstOrDefault(r => r.Plan.Id == planId) is { } row)
+            SelectedRow = row;
     }
 
     private void Reload()

@@ -101,6 +101,12 @@
 
             <!-- Visual summary after execution -->
             <ContentControl Content="{Binding Summary}" IsVisible="{Binding Summary, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+            <!-- Link to the plan in the Planos screen (references/UI.md, section 6) -->
+            <Button Classes="neutral" Margin="14,0,14,10" HorizontalAlignment="Left" Command="{Binding OpenInPlansCommand}"
+                    IsVisible="{Binding ShowPlanLink}" ToolTip.Tip="Abrir este plano na tela Planos">
+                <TextBlock Text="{Binding PlanId, StringFormat='Ver plano {0} em Planos'}" />
+            </Button>
         </StackPanel>
     </Border>
 </UserControl>

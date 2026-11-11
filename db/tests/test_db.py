@@ -127,6 +127,8 @@ def verify_audit_chain(conn):
 class DatabaseTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        # Registered first, so it runs after every other cleanup: on Windows an open connection locks the file.
+        self.addCleanup(shutil.rmtree, self.tmp)
         self.path = pathlib.Path(self.tmp) / "erp.db"
         self.conn = sqlite3.connect(self.path)
         self.conn.execute("PRAGMA foreign_keys = ON")
@@ -134,7 +136,6 @@ class DatabaseTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        shutil.rmtree(self.tmp)
 
     def assertDenied(self, sql, params=()):
         with self.assertRaises(sqlite3.DatabaseError) as ctx:
@@ -451,6 +452,7 @@ class MigrationTo3Tests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)  # after the connections closed by other cleanups (Windows locks open files)
         self.paths = {"fresh": pathlib.Path(self.tmp) / "fresh.db", "migrated": pathlib.Path(self.tmp) / "migrated.db"}
         self.fresh = sqlite3.connect(self.paths["fresh"])
         load_scripts(self.fresh, BASE_SCRIPTS)
@@ -467,7 +469,6 @@ class MigrationTo3Tests(unittest.TestCase):
     def tearDown(self):
         self.fresh.close()
         self.migrated.close()
-        shutil.rmtree(self.tmp)
 
     def assertSameRows(self, query):
         self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)

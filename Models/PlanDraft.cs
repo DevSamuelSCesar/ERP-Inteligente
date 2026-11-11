@@ -27,8 +27,9 @@ public sealed class PlanDraft
 {
     public const string DslVersion = "1.0";
 
-    private PlanDraft(string json, PlanOrigin origin, string? skill, long? recipeId = null)
+    private PlanDraft(string json, PlanOrigin origin, string? skill, long? recipeId = null, IReadOnlyList<long>? memoryIds = null)
     {
+        MemoryIds = origin == PlanOrigin.Ai ? memoryIds ?? [] : [];
         Json = json;
         Origin = origin;
         Skill = skill;
@@ -37,6 +38,9 @@ public sealed class PlanDraft
 
     /// <summary>The recipe the draft was built from (only for <see cref="PlanOrigin.Recipe"/>); stored in <c>plans.recipe_id</c>.</summary>
     public long? RecipeId { get; }
+
+    /// <summary>The memories the Planner had in front of it (only for <see cref="PlanOrigin.Ai"/>): their confidence follows the plan's outcome.</summary>
+    public IReadOnlyList<long> MemoryIds { get; }
 
     /// <summary>The DSL document exactly as it will be validated and stored in <c>plans.plan_json</c>.</summary>
     public string Json { get; }
@@ -47,7 +51,7 @@ public sealed class PlanDraft
     public string? Skill { get; }
 
     /// <summary>Wraps a DSL document received as text (e.g. from the Planner); only JSON syntax is checked here.</summary>
-    public static PlanDraft FromJson(string json, PlanOrigin origin = PlanOrigin.User, long? recipeId = null)
+    public static PlanDraft FromJson(string json, PlanOrigin origin = PlanOrigin.User, long? recipeId = null, IReadOnlyList<long>? memoryIds = null)
     {
         if (origin == PlanOrigin.Recipe && recipeId is null)
             throw new ArgumentException("A recipe draft needs the recipe id.", nameof(recipeId));
@@ -57,7 +61,7 @@ public sealed class PlanDraft
                     && document.RootElement.TryGetProperty("skill", out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
-        return new PlanDraft(json, origin, skill, recipeId);
+        return new PlanDraft(json, origin, skill, recipeId, memoryIds);
     }
 
     /// <summary>Builds a DSL v1 document from typed steps.</summary>

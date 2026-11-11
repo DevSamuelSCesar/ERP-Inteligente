@@ -46,7 +46,8 @@ public sealed class AppHost : IDisposable
         Backups = new BackupService(database, Policy, AuditLog, time);
         var skills = new SkillCatalog(database);
         RecipeStore = new RecipeStore(database, Policy, AuditLog, time, skills);
-        Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore, RecipeStore);
+        MemoryFeedback = new MemoryFeedback(database, MemoryStore, AuditLog, time);
+        Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore, RecipeStore, MemoryFeedback);
         LlmSettings = new LlmSettings(secrets, database.Path);
         // Feature 8: one adapter per provider behind a router; each request names its provider (model per role).
         var settings = LlmSettings;
@@ -81,7 +82,8 @@ public sealed class AppHost : IDisposable
         KnowledgeRetriever = new KnowledgeRetriever(database);
         Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: skills,
             memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever,
-            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings, UsageLog), usage: UsageLog);
+            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings, UsageLog), usage: UsageLog,
+            feedback: MemoryFeedback);
         SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
         if (runScheduledJobs)
@@ -116,6 +118,7 @@ public sealed class AppHost : IDisposable
     public MemoryStore MemoryStore { get; }
     public RecipeStore RecipeStore { get; }
     public MemoryMaintenance MemoryMaintenance { get; }
+    public MemoryFeedback MemoryFeedback { get; }
     public LlmUsageLog UsageLog { get; }
     public BackupService Backups { get; }
     public MemoryRetriever MemoryRetriever { get; }

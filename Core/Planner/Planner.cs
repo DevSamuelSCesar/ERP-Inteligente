@@ -43,7 +43,8 @@ public sealed partial class Planner(
     MemoryRetriever? memoryRetriever = null,
     KnowledgeRetriever? knowledge = null,
     RecipeMatcher? recipeMatcher = null,
-    Operations.LlmUsageLog? usage = null)
+    Operations.LlmUsageLog? usage = null,
+    MemoryFeedback? feedback = null)
 {
     /// <summary>One <c>llm_usage</c> row per request that called the planning model (feature 9).</summary>
     private void RecordUsage(UserSession user, RunState state, PlannerResult result)
@@ -105,6 +106,9 @@ public sealed partial class Planner(
         public SkillProposal? Skill { get; set; }
         public List<RememberedMemory> Remembered { get; } = [];
         public List<SuspiciousContent> Suspicious { get; } = [];
+
+        /// <summary>Memories the model had in front of it (automatic context and search_memories): recorded with its plans.</summary>
+        public HashSet<long> MemoryIds { get; } = [];
         public bool HasResult => Proposals.Count > 0 || Skill is not null;
 
         /// <summary>Calls and tokens of the planning model in this request (feature 9: cost panel).</summary>
@@ -370,7 +374,12 @@ public sealed partial class Planner(
 
             status.Report(PlannerTools.StatusFor(name, args));
             if (name == PlannerTools.SearchKnowledge) return Finish(PlannerTools.ExecuteSearchKnowledge(knowledge!, args));
-            if (name == PlannerTools.SearchMemories) return Finish(PlannerTools.ExecuteSearchMemories(memoryRetriever!, user, args));
+            if (name == PlannerTools.SearchMemories)
+            {
+                var found = PlannerTools.ExecuteSearchMemories(memoryRetriever!, user, args);
+                state.MemoryIds.UnionWith(MemoryIdsOf(found.Json));
+                return Finish(found);
+            }
             if (name == PlannerTools.SearchRecipes) return Finish(PlannerTools.ExecuteSearchRecipes(database, args));
             return Finish(PlannerTools.Execute(database, name, args, user.WarehouseId));
         }
@@ -462,6 +471,7 @@ public sealed partial class Planner(
                         block = block.Replace("<dados fonte=\"memorias\">", $"<dados fonte=\"memorias\" {SuspiciousAttribute}>", StringComparison.Ordinal);
                     builder.Append(block).Append('\n');
                     usedMemories.AddRange(kept.Select(m => m.Id));
+                    state.MemoryIds.UnionWith(usedMemories);
                 }
             }
             var usedPaths = new List<string>();
@@ -567,11 +577,15 @@ public sealed partial class Planner(
                     ["message"] = e.Message,
                 });
             var json = PlannerTools.Serialize(new JsonObject { ["status"] = "invalid", ["errors"] = errors });
-            return Reject(new ToolOutcome(json, false, "plan_invalid"));
+            // The codes go to the audit row: recurring ones become pattern memories (references/ARQUITETURA.md, section 8).
+            Append(aiUserId, user, "ai.tool", "tool:" + ProposePlan, AuditOutcome.Denied,
+                Details(call, "plan_invalid", preview.Errors.Select(e => e.Code).Distinct().Take(MaxReportedErrors)));
+            feedback?.ObserveErrors(user, preview.Document?.Skill ?? SkillOfPlan(planJson), preview.Errors);
+            return new ToolOutcome(json, false, "plan_invalid");
         }
 
         Append(aiUserId, user, "ai.tool", "tool:" + ProposePlan, AuditOutcome.Allowed, Details(call, "plan_valid"));
-        state.Proposals.Add(new ProposalItem(title, rationale, assumptions, PlanDraft.FromJson(planJson, PlanOrigin.Ai), preview));
+        state.Proposals.Add(new ProposalItem(title, rationale, assumptions, PlanDraft.FromJson(planJson, PlanOrigin.Ai, memoryIds: state.MemoryIds.ToArray()), preview));
         var summary = new JsonObject { ["status"] = "valid", ["proposals"] = state.Proposals.Count, ["risk"] = preview.Risk.ToString().ToLowerInvariant() };
         return new ToolOutcome(PlannerTools.Serialize(summary), true, "plan_valid");
     }
@@ -1030,6 +1044,31 @@ public sealed partial class Planner(
     private static readonly JsonSerializerOptions DetailsOptions = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
 
     /// <summary>Small audit details: the outcome code and the truncated arguments (model-written, never sensitive).</summary>
+    private static string Details(LlmToolCall call, string code, IEnumerable<string>? errors)
+    {
+        var node = JsonNode.Parse(Details(call, code))!.AsObject();
+        node["errors"] = new JsonArray((errors ?? []).Select(e => (JsonNode?)JsonValue.Create(e)).ToArray());
+        return node.ToJsonString(DetailsOptions);
+    }
+
+    /// <summary>The ids of the memories in a search_memories result.</summary>
+    private static IEnumerable<long> MemoryIdsOf(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json)?["rows"] is JsonArray rows
+                ? rows.Select(r => r?["id"] is JsonValue v && v.TryGetValue<long>(out var id) ? id : 0).Where(id => id > 0).ToList()
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string? SkillOfPlan(string planJson) =>
+        TryParseObject(planJson, out var plan) && plan["skill"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
     private static string Details(LlmToolCall call, string code)
     {
         var args = call.ArgumentsJson ?? string.Empty;
