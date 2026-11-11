@@ -9,6 +9,7 @@ using erp_inteligente.Core.Data;
 using erp_inteligente.Core.Memory;
 using erp_inteligente.Core.Skills;
 using erp_inteligente.Core.Policy;
+using erp_inteligente.Core.Recipes;
 using erp_inteligente.Models;
 using Microsoft.Data.Sqlite;
 
@@ -46,9 +47,12 @@ public sealed class PlanEngine
     private readonly PlanSimulator _simulator;
     private readonly PlanExecutor _executor;
     private readonly MemoryStore? _memories;
+    private readonly RecipeStore? _recipes;
 
     /// <param name="memories">When set, rejecting an AI plan also saves a system correction memory (null = off).</param>
-    public PlanEngine(NexusDatabase database, PolicyEngine policy, AuditLog audit, TimeProvider time, MemoryStore? memories = null)
+    /// <param name="recipes">When set, outcomes of recipe plans are counted and repeated plans become candidates (feature 7).</param>
+    public PlanEngine(NexusDatabase database, PolicyEngine policy, AuditLog audit, TimeProvider time, MemoryStore? memories = null,
+        RecipeStore? recipes = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(policy);
@@ -59,6 +63,7 @@ public sealed class PlanEngine
         _audit = audit;
         _time = time;
         _memories = memories;
+        _recipes = recipes;
         _simulator = new PlanSimulator(database, time);
         _executor = new PlanExecutor(database, time);
     }
@@ -86,8 +91,16 @@ public sealed class PlanEngine
     /// reversible ones execute at once. Text that is not JSON (or is too large) is not stored.
     /// </summary>
     /// <param name="plannedBy"><c>user</c>, <c>ai</c> or <c>recipe</c>; a plan of the AI only gets the AI ∩ requester rights.</param>
+    /// <param name="recipeId">The recipe the plan was built from; stored only when <paramref name="plannedBy"/> is <c>recipe</c>.</param>
     /// <exception cref="PolicyDeniedException">The requester (or the AI acting for them) lacks <c>plan.submit</c>.</exception>
-    public EngineSubmission Submit(UserSession requester, string planJson, string plannedBy)
+    public EngineSubmission Submit(UserSession requester, string planJson, string plannedBy, long? recipeId = null)
+    {
+        var submission = SubmitCore(requester, planJson, plannedBy, plannedBy == "recipe" ? recipeId : null);
+        if (submission.PlanId is { } id) AfterDecision(id);
+        return submission;
+    }
+
+    private EngineSubmission SubmitCore(UserSession requester, string planJson, string plannedBy, long? recipeId)
     {
         ArgumentNullException.ThrowIfNull(requester);
         ArgumentNullException.ThrowIfNull(planJson);
@@ -100,7 +113,7 @@ public sealed class PlanEngine
 
         var document = parsed.Document;
         var risk = document is null ? RiskLevel.Reversible : Reportable(RiskOf(document));
-        var planId = InsertPlan(requester, plannedBy, document, planJson, risk);
+        var planId = InsertPlan(requester, plannedBy, document, planJson, risk, recipeId);
 
         if (document is null)
             return Fail(planId, requester, parsed.Errors, null);
@@ -154,6 +167,7 @@ public sealed class PlanEngine
             using var transaction = connection.BeginTransaction(deferred: false);
             MarkFailed(connection, transaction, planId, requester, parsed.Errors, approver.UserId);
             transaction.Commit();
+            AfterDecision(planId);
             return;
         }
 
@@ -161,6 +175,7 @@ public sealed class PlanEngine
         _executor.Execute(requester, document, planId, AllowedFor(requester, row.PlannedBy),
             (c, t, r) => MarkExecuted(c, t, planId, requester, approver, "pending_approval", document, r),
             (c, t, r) => MarkFailed(c, t, planId, requester, r.Errors, approver.UserId));
+        AfterDecision(planId);
     }
 
     /// <summary>Rejects a pending plan with a reason of 1 to 200 characters (trimmed).</summary>
@@ -196,6 +211,43 @@ public sealed class PlanEngine
 
         if (_memories is not null && row.PlannedBy == "ai")
             RememberRejection(approver, planId, trimmed);
+        AfterDecision(planId);
+    }
+
+    /// <summary>
+    /// Learning (references/ARQUITETURA.md, section 4, step 10): a plan built from a recipe counts as a success or a failure
+    /// (a rejection is a failure); any other executed plan may turn its structure into a candidate recipe. Runs after the
+    /// decision is committed; an error here never undoes or hides the decision.
+    /// </summary>
+    private void AfterDecision(long planId)
+    {
+        if (_recipes is null) return;
+        try
+        {
+            string plannedBy;
+            string status;
+            long? recipeId;
+            using (var connection = _database.OpenApplication())
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT planned_by, status, recipe_id FROM plans WHERE id = $id";
+                command.Parameters.AddWithValue("$id", planId);
+                using var reader = command.ExecuteReader();
+                if (!reader.Read()) return;
+                plannedBy = reader.GetString(0);
+                status = reader.GetString(1);
+                recipeId = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+            }
+            if (status is "validating" or "pending_approval") return;
+            if (recipeId is { } recipe)
+                _recipes.RecordOutcome(recipe, planId, status == "executed");
+            else if (status == "executed" && plannedBy != "recipe")
+                _recipes.LearnFrom(planId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Recipe learning failed: " + ex.GetType().Name);
+        }
     }
 
     /// <summary>
@@ -315,17 +367,18 @@ public sealed class PlanEngine
         return new EngineSubmission(planId, "failed", errors, null);
     }
 
-    private long InsertPlan(UserSession requester, string plannedBy, PlanDocument? document, string rawJson, RiskLevel risk)
+    private long InsertPlan(UserSession requester, string plannedBy, PlanDocument? document, string rawJson, RiskLevel risk, long? recipeId)
     {
         using var connection = _database.OpenApplication();
         using var transaction = connection.BeginTransaction(deferred: false);
         long id;
         using (var insert = Command(connection, transaction,
-            "INSERT INTO plans (requested_by, planned_by, skill, intent, plan_json, dsl_version, risk, status, created_at) " +
-            "VALUES ($by, $planned, $skill, $intent, $json, $version, $risk, 'validating', $at) RETURNING id"))
+            "INSERT INTO plans (requested_by, planned_by, recipe_id, skill, intent, plan_json, dsl_version, risk, status, created_at) " +
+            "VALUES ($by, $planned, $recipe, $skill, $intent, $json, $version, $risk, 'validating', $at) RETURNING id"))
         {
             insert.Parameters.AddWithValue("$by", requester.UserId);
             insert.Parameters.AddWithValue("$planned", plannedBy);
+            insert.Parameters.AddWithValue("$recipe", (object?)recipeId ?? DBNull.Value);
             insert.Parameters.AddWithValue("$skill", (object?)document?.Skill ?? DBNull.Value);
             insert.Parameters.AddWithValue("$intent", document?.Intent ?? "unknown");
             insert.Parameters.AddWithValue("$json", document?.ToJson() ?? rawJson);

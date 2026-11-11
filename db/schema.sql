@@ -170,8 +170,21 @@ CREATE TABLE recipes (
     skill_version      TEXT NOT NULL,
     status             TEXT NOT NULL CHECK (status IN ('candidate', 'active', 'suspended', 'demoted')),
     success_count      INTEGER NOT NULL DEFAULT 0,
-    failure_count      INTEGER NOT NULL DEFAULT 0
+    failure_count      INTEGER NOT NULL DEFAULT 0,
+    -- Feature 7 (migrations/007_recipes.sql appends these columns in this order).
+    skill               TEXT,
+    signature           TEXT,  -- plan structure: "op(arg,...)" per step, so equal plans map to one recipe
+    example_params_json TEXT CHECK (example_params_json IS NULL OR json_valid(example_params_json)),
+    failure_streak      INTEGER NOT NULL DEFAULT 0 CHECK (failure_streak >= 0),  -- consecutive failures; 3 demote the recipe
+    source_plan_id      INTEGER REFERENCES plans (id),
+    promoted_by         INTEGER REFERENCES users (id),
+    created_at          TEXT,
+    promoted_at         TEXT,
+    last_used_at        TEXT,
+    status_reason       TEXT CHECK (status_reason IS NULL OR length(status_reason) BETWEEN 1 AND 300)
 ) STRICT;
+
+CREATE UNIQUE INDEX recipes_by_signature ON recipes (signature) WHERE signature IS NOT NULL;
 
 CREATE TABLE plans (
     id                  INTEGER PRIMARY KEY,

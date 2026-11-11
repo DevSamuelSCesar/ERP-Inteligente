@@ -10,6 +10,7 @@ namespace Nexus.Tests.Core.Data;
 /// current version on open, keeping their data. Version 2 → 3 adds the catalog flags, the AI operational rights and
 /// the v_ai_* views (migrations/003_full_catalog.sql). Version 4 → 5 adds skills and v_ai_skills (migrations/005_skills.sql).
 /// Version 5 → 6 rebuilds memories with warehouse, status and origin, and guards them (migrations/006_memory.sql).
+/// Version 6 → 7 adds the recipe columns, guards and v_ai_recipes with the template (migrations/007_recipes.sql).
 /// </summary>
 public sealed class MigrationTests : IDisposable
 {
@@ -21,6 +22,7 @@ public sealed class MigrationTests : IDisposable
     private static readonly string[] Version3Scripts = ["schema_v3.sql", "security_v3.sql", "seed_v3.sql"];
     private static readonly string[] Version4Scripts = ["schema_v4.sql", "security_v4.sql", "seed_v4.sql"];
     private static readonly string[] Version5Scripts = ["schema_v5.sql", "security_v5.sql", "seed_v5.sql"];
+    private static readonly string[] Version6Scripts = ["schema_v6.sql", "security_v6.sql", "seed_v6.sql"];
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "nexus-tests-" + Guid.NewGuid().ToString("N"));
     private readonly InMemorySecretStore _store = new();
@@ -73,10 +75,26 @@ public sealed class MigrationTests : IDisposable
     private NexusDatabase Open(string? path = null) =>
         DatabaseBootstrapper.OpenOrCreate(path ?? _path, new KeyManager(_store));
 
-    /// <summary>Checks what the current schema (version 6) must have: migrations/006_memory.sql on top of the version 5 objects.</summary>
+    /// <summary>Checks what the current schema (version 7) must have: migrations/007_recipes.sql on top of the version 6 objects.</summary>
+    private static void AssertVersion7Schema(SqliteConnection c)
+    {
+        Assert.Equal(7L, Scalar(c, "PRAGMA user_version"));
+        Assert.EndsWith(",skill,signature,example_params_json,failure_streak,source_plan_id,promoted_by,created_at,promoted_at,last_used_at,status_reason",
+            ColumnList(c, "recipes"));
+        Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name = 'recipes_by_signature'"));
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name IN ('recipes_deny_delete', 'recipes_guard_update')"));
+        Assert.Equal("id,name,description,intent,skill,plan_template_json,params_schema_json,status", ColumnList(c, "v_ai_recipes"));
+        // The seeded recipe keeps its id and uses, and gets the structure and example values of a fresh install.
+        Assert.Equal("move_stock(from,qty,sku,to)", Scalar(c, "SELECT signature FROM recipes WHERE id = 1 AND name = 'armazenar_da_doca'"));
+        Assert.Equal(7L, Scalar(c, "SELECT success_count FROM recipes WHERE id = 1"));
+        // recipe.manage joins the list the AI role can never get.
+        Assert.Contains("'recipe.manage'", (string)Scalar(c, "SELECT sql FROM sqlite_schema WHERE name = 'role_permissions_deny_ai_escalation'")!);
+        AssertVersion6Schema(c);
+    }
+
+    /// <summary>Checks what migrations/006_memory.sql must have produced on top of the version 5 objects.</summary>
     private static void AssertVersion6Schema(SqliteConnection c)
     {
-        Assert.Equal(6L, Scalar(c, "PRAGMA user_version"));
         Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'memories'"));
         Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'index' AND name = 'memories_by_warehouse'"));
         Assert.Equal(5L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name IN " +
@@ -163,41 +181,41 @@ public sealed class MigrationTests : IDisposable
         using var db = Open();
         using var c = db.OpenApplication();
 
-        AssertVersion6Schema(c);
+        AssertVersion7Schema(c);
     }
 
     [Fact]
-    public void Version_3_database_is_upgraded_to_6_with_the_reservation_backfill()
+    public void Version_3_database_is_upgraded_to_7_with_the_reservation_backfill()
     {
         var path = CreateLegacyDatabase("v3.db", 3, Version3Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion6Schema(c);
+        AssertVersion7Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_2_database_is_upgraded_to_6_and_keeps_its_data()
+    public void Version_2_database_is_upgraded_to_7_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v2.db", 2, Version2Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion6Schema(c);
+        AssertVersion7Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
 
     [Fact]
-    public void Version_4_database_is_upgraded_to_6_and_keeps_its_data()
+    public void Version_4_database_is_upgraded_to_7_and_keeps_its_data()
     {
         var path = CreateLegacyDatabase("v4.db", 4, Version4Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion6Schema(c);
+        AssertVersion7Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM order_reservations"));
@@ -206,17 +224,36 @@ public sealed class MigrationTests : IDisposable
     }
 
     [Fact]
-    public void Version_5_database_is_upgraded_to_6_and_keeps_its_memories_and_search()
+    public void Version_5_database_is_upgraded_to_7_and_keeps_its_memories_and_search()
     {
         var path = CreateLegacyDatabase("v5.db", 5, Version5Scripts);
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion6Schema(c);
+        AssertVersion7Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
+    }
+
+    [Fact]
+    public void Version_6_database_is_upgraded_to_7_and_keeps_its_recipe_plans_and_audit()
+    {
+        var path = CreateLegacyDatabase("v6.db", 6, Version6Scripts);
+        using var db = Open(path);
+        using var c = db.OpenApplication();
+
+        AssertVersion7Schema(c);
+        Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM memories"));
+        Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
+        Assert.True(AuditVerifier.Verify(c).IsValid);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() => Exec(c, "DELETE FROM recipes WHERE id = 1")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "UPDATE recipes SET plan_template_json = '{}' WHERE id = 1")).Message);
+        Assert.Contains("DENY", Assert.Throws<SqliteException>(() =>
+            Exec(c, "INSERT INTO role_permissions (role_id, permission, effect) VALUES (5, 'recipe.manage', 'ALLOW')")).Message);
     }
 
     [Fact]

@@ -71,6 +71,20 @@ WHEN new.id <> old.id OR new.warehouse_id <> old.warehouse_id OR new.origin <> o
     SELECT RAISE(ABORT, 'DENY: illegal memory change');
 END;
 
+-- Recipes are demoted, never deleted; the template, its parameters and its origin are fixed (migrations/007_recipes.sql).
+CREATE TRIGGER recipes_deny_delete BEFORE DELETE ON recipes BEGIN
+    SELECT RAISE(ABORT, 'DENY: recipes are demoted, never deleted');
+END;
+
+CREATE TRIGGER recipes_guard_update BEFORE UPDATE ON recipes
+WHEN new.id <> old.id OR new.plan_template_json <> old.plan_template_json
+  OR new.params_schema_json <> old.params_schema_json OR new.intent <> old.intent
+  OR (old.signature IS NOT NULL AND new.signature IS NOT old.signature)
+  OR new.source_plan_id IS NOT old.source_plan_id
+  OR (old.created_at IS NOT NULL AND new.created_at IS NOT old.created_at) BEGIN
+    SELECT RAISE(ABORT, 'DENY: illegal recipe change');
+END;
+
 CREATE TRIGGER plans_deny_update_final BEFORE UPDATE ON plans
 WHEN old.status IN ('executed', 'failed', 'rejected') BEGIN
     SELECT RAISE(ABORT, 'DENY: finished plans are immutable');
@@ -92,7 +106,7 @@ CREATE TRIGGER role_permissions_deny_ai_escalation BEFORE INSERT ON role_permiss
 WHEN new.effect = 'ALLOW'
  AND (SELECT is_ai FROM roles WHERE id = new.role_id) = 1
  AND new.permission IN ('plan.approve', 'user.manage', 'role.manage', 'sensitive.read',
-                        'audit.read', 'skill.manage', 'memory.manage') BEGIN
+                        'audit.read', 'skill.manage', 'memory.manage', 'recipe.manage') BEGIN
     SELECT RAISE(ABORT, 'DENY: permission cannot be granted to the AI role');
 END;
 
@@ -198,7 +212,7 @@ JOIN outbound_order_lines ol ON ol.outbound_order_id = o.id
 JOIN products p ON p.id = ol.product_id;
 
 CREATE VIEW v_ai_recipes AS
-SELECT id, name, description, intent, params_schema_json, status
+SELECT id, name, description, intent, skill, plan_template_json, params_schema_json, status
 FROM recipes
 WHERE status = 'active';
 

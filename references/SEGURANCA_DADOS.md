@@ -143,6 +143,19 @@ Risco residual: um fato operacional errado, mas inofensivo na forma, passa no fi
 
 Risco residual: o detector é por regras. Um texto hostil bem disfarçado passa sem aviso. Nesse caso valem as camadas seguintes (seção 12.8 da arquitetura): o motor valida todo plano, quem pediu confirma e um supervisor aprova os críticos.
 
+### 3.5 Receitas: planos reutilizáveis (feature 7)
+
+Uma receita deixa repetir um plano sem planejamento. O risco é uma receita errada ou maliciosa virar um atalho. Controles:
+
+1. **Humano promove:** o sistema só detecta candidatas (3 planos iguais executados). Promover, suspender, reativar e despromover exigem `recipe.manage` (supervisor). A IA nunca recebe esse direito (trigger `role_permissions_deny_ai_escalation`).
+2. **Texto controlado:** a descrição, que vai ao prompt do Matcher, passa pelo detector de injeção e pelo filtro de dados pessoais. As receitas entram no prompt dentro de `<dados fonte="receitas">`.
+3. **Valores validados:** os parâmetros têm o tipo e o padrão do JSON Schema da operação (SKU `^[A-Z]{3}-[0-9]{3}$`, quantidade inteira...), sem campo extra. O plano montado passa pelo motor como qualquer outro, com os direitos de quem pediu.
+4. **Matcher sem poder:** ele só escolhe entre as receitas oferecidas e extrai valores; não tem ferramentas e não grava nada. Um pedido com cara de injeção não usa o atalho. O resultado é uma proposta que quem pediu confirma, e críticos esperam outro supervisor.
+5. **Modelo imutável:** receitas não são apagadas, e o modelo, os parâmetros, a intenção, a assinatura e a origem não mudam (triggers). Toda mudança é auditada (`recipe.*`, `ai.recipe_match`) sem os valores.
+6. **Validade:** muda a DSL ou a skill, a receita é suspensa até ser revalidada. 3 falhas seguidas despromovem.
+
+Risco residual: um supervisor pode promover uma candidata sem conferir os passos. Por isso a tela mostra os passos, a origem e os usos, e cada uso continua passando pelo motor e pela aprovação dos críticos.
+
 ## 4. Ameaças e gargalo
 
 | Ameaça | Cenário | Defesa | Como provamos |
@@ -247,8 +260,9 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 | CPF, CNPJ, e-mail, telefone, chave ou senha chegando à auditoria (mascarados antes do hash, cadeia válida) | `SensitiveDataRedactorTests` (C#) | Automatizado ✅ |
 | Dado hostil marcado, auditado como `ai.injection` e avisado; mensagens próprias e argumentos ecoados não são examinados | `InjectionDefenseTests` e `InjectionDetectorTests` (C#) | Automatizado ✅ |
 | Suíte de 25 ataques de prompt injection, exfiltração e SQL injection com métricas | `PromptInjectionSuiteTests` (C#) | Automatizado ✅ |
+| Receitas: IA ou operador promovendo, descrição com instrução, parâmetro com SQL ou campo extra, receita fora das oferecidas pelo Matcher, pedido suspeito usando o atalho, apagar ou alterar o modelo | `RecipeStoreTests`, `RecipeTemplateTests`, `RecipeMatcherTests` e `RecipesViewModelTests` (C#); `RecipeTests` e `MigrationTo7Tests` (Python) | Automatizado ✅ |
 
 ```bash
-python3 -m unittest discover -s db/tests -v   # 58 testes
-dotnet test tests/Nexus.Tests                 # 1278 testes do app
+python3 -m unittest discover -s db/tests -v   # 103 testes
+dotnet test tests/Nexus.Tests                 # 1321 testes do app
 ```

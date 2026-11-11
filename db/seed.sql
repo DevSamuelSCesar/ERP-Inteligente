@@ -196,13 +196,15 @@ WHERE o.status = 'reserved'
 -- Recipes, plans, memories, audit
 -- ---------------------------------------------------------------------------
 
-INSERT INTO recipes (id, name, description, intent, plan_template_json, params_schema_json, dsl_version, skill_version, status, success_count) VALUES
+INSERT INTO recipes (id, name, description, intent, plan_template_json, params_schema_json, dsl_version, skill_version, status, success_count,
+                     skill, signature, example_params_json, created_at) VALUES
     (1, 'armazenar_da_doca',
         'Move a quantidade recebida de um SKU da doca para o endereço livre mais próximo',
         'putaway',
         '{"intent":"putaway","steps":[{"op":"move_stock","args":{"sku":"$sku","qty":"$qty","from":"$dock","to":"$target"}}]}',
         '{"type":"object","required":["sku","qty","dock","target"],"properties":{"sku":{"type":"string"},"qty":{"type":"integer","minimum":1},"dock":{"type":"string"},"target":{"type":"string"}},"additionalProperties":false}',
-        '1.0', 'armazenagem@1.0', 'active', 7);
+        '1.0', 'armazenagem@1.0', 'active', 7,
+        'armazenagem', 'move_stock(from,qty,sku,to)', '{"sku":"ABC-123","qty":40,"dock":"DOCA-01","target":"A-01-01"}', '2026-10-20T10:05:00Z');
 
 INSERT INTO plans (id, requested_by, planned_by, recipe_id, skill, intent, plan_json, dsl_version, risk, status, simulated_diff_json, attempts, created_at, executed_at) VALUES
     (1, 1, 'ai', NULL, 'armazenagem', 'putaway',

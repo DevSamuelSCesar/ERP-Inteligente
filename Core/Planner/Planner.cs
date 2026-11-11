@@ -15,6 +15,7 @@ using erp_inteligente.Core.Knowledge;
 using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Memory;
 using erp_inteligente.Core.Policy;
+using erp_inteligente.Core.Recipes;
 using erp_inteligente.Core.Skills;
 using erp_inteligente.Models;
 
@@ -40,7 +41,8 @@ public sealed partial class Planner(
     SkillCatalog? skills = null,
     MemoryStore? memories = null,
     MemoryRetriever? memoryRetriever = null,
-    KnowledgeRetriever? knowledge = null)
+    KnowledgeRetriever? knowledge = null,
+    RecipeMatcher? recipeMatcher = null)
 {
     internal const string ProposePlan = "propose_plan";
     internal const string OfferOptions = "offer_options";
@@ -133,6 +135,19 @@ public sealed partial class Planner(
         if (canSearchKnowledge) tools.Add(PlannerTools.DefinitionTool(PlannerTools.SearchKnowledge));
         if (canSearchMemories) tools.Add(PlannerTools.DefinitionTool(PlannerTools.SearchMemories));
         if (canRemember) tools.Add(PlannerTools.RememberTool());
+        if (recipeMatcher is not null) tools.Add(PlannerTools.DefinitionTool(PlannerTools.SearchRecipes));
+
+        var state = new RunState();
+        var suspiciousRequest = await Task.Run(() => ScanRequest(aiUserId, user, request), ct);
+
+        // Recipe first (references/ARQUITETURA.md, section 4, step 2): a match skips planning by the strong model. A request
+        // that looks like an injection never takes this shortcut; it gets the full Planner and its defenses.
+        if (recipeMatcher is not null && canPropose && !suspiciousRequest)
+        {
+            status.Report("Procurando receita");
+            if (await TryRecipeAsync(user, aiUserId, rights, request, ct) is { } recipeResult)
+                return recipeResult;
+        }
 
         var messages = new List<LlmMessage> { LlmMessage.System(BuildSystemPrompt(user, operations, rights, canDraftSkill, canRemember, canSearchKnowledge)) };
         foreach (var turn in history.TakeLast(_options.MaxHistoryTurns))
@@ -141,8 +156,6 @@ public sealed partial class Planner(
             messages.Add(LlmMessage.User(turn.Request));
             messages.Add(LlmMessage.Assistant(turn.Reply.Content, null, turn.Reply.ReasoningContent));
         }
-        var state = new RunState();
-        await Task.Run(() => ScanRequest(aiUserId, user, request), ct);
         var context = await Task.Run(() => BuildContext(user, aiUserId, state, request), ct);
         messages.Add(LlmMessage.User(context + request));
 
@@ -310,7 +323,8 @@ public sealed partial class Planner(
                     return Finish(PlannerTools.Error("not_allowed", "Você não tem permissão para registrar memórias."));
                 return Finish(RememberTool(user, state, call, status));
             }
-            if ((name == PlannerTools.SearchKnowledge && knowledge is null) || (name == PlannerTools.SearchMemories && memoryRetriever is null))
+            if ((name == PlannerTools.SearchKnowledge && knowledge is null) || (name == PlannerTools.SearchMemories && memoryRetriever is null)
+                || (name == PlannerTools.SearchRecipes && recipeMatcher is null))
                 return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
             if (!PlannerTools.IsReadTool(name))
                 return Finish(PlannerTools.Error("unknown_tool", "Ferramenta desconhecida."), "unknown");
@@ -323,6 +337,7 @@ public sealed partial class Planner(
             status.Report(PlannerTools.StatusFor(name, args));
             if (name == PlannerTools.SearchKnowledge) return Finish(PlannerTools.ExecuteSearchKnowledge(knowledge!, args));
             if (name == PlannerTools.SearchMemories) return Finish(PlannerTools.ExecuteSearchMemories(memoryRetriever!, user, args));
+            if (name == PlannerTools.SearchRecipes) return Finish(PlannerTools.ExecuteSearchRecipes(database, args));
             return Finish(PlannerTools.Execute(database, name, args, user.WarehouseId));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -850,7 +865,7 @@ public sealed partial class Planner(
 
     // ---- prompt --------------------------------------------------------------------------------------------
 
-    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot|skills|skill_authoring|memory_authoring)\}")]
+    [GeneratedRegex(@"\{(warehouse_code|operator|operations|unavailable|today|today_lot|skills|skill_authoring|memory_authoring|recipes)\}")]
     private static partial Regex PlaceholderPattern();
 
     private string BuildSystemPrompt(
@@ -882,6 +897,8 @@ public sealed partial class Planner(
             ["skills"] = SkillIndexText(rights),
             ["skill_authoring"] = canDraftSkill ? SkillAuthoring : string.Empty,
             ["memory_authoring"] = MemoryAuthoring(canRemember, canSearchKnowledge),
+            ["recipes"] = recipeMatcher is null ? string.Empty
+                : "- Receitas são planos que já funcionaram. Antes de montar um plano do zero, use search_recipes e, se uma servir, troque cada $parametro pelo valor e proponha o plano.",
             ["today"] = today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             ["today_lot"] = today.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture),
         };
@@ -952,7 +969,7 @@ public sealed partial class Planner(
 
     /// <summary>Tools whose result carries external data (database rows, procedures, memories).</summary>
     private static bool ScansResult(string name) =>
-        PlannerTools.ReadToolNames.Contains(name) || name is PlannerTools.SearchKnowledge or PlannerTools.SearchMemories;
+        PlannerTools.ReadToolNames.Contains(name) || name is PlannerTools.SearchKnowledge or PlannerTools.SearchMemories or PlannerTools.SearchRecipes;
 
     /// <summary>Tool name for audit and for the data wrapper: only known names are echoed.</summary>
     private static string SafeToolName(string name) =>

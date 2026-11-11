@@ -36,6 +36,29 @@ public class HeadlessUiTests
         window.Close();
     }
 
+    /// <summary>Receitas: the active recipe shows its steps and one input per parameter, with the example as hint.</summary>
+    [AvaloniaFact]
+    public async Task Recipes_page_renders_the_use_form_of_the_selected_recipe()
+    {
+        using var app = new TestApp();
+        var shell = await app.ShellForAsync("op.joao");
+        var window = new MainWindow { DataContext = shell };
+        window.Show();
+        await shell.NavigateCommand.ExecuteAsync(shell.MenuItems.Single(i => i.IconKey == "Recipes"));
+        Dispatcher.UIThread.RunJobs();
+
+        var view = Assert.Single(window.GetVisualDescendants().OfType<RecipesView>());
+        var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains("Usar receita", texts);
+        Assert.Contains("1. Movimentação", texts);
+        Assert.Contains("Doca", texts);
+        var hints = view.GetVisualDescendants().OfType<TextBox>().Select(t => t.PlaceholderText).ToList();
+        Assert.Contains("ex.: DOCA-01", hints);
+        Assert.Contains("ex.: 40", hints);
+        Assert.DoesNotContain(view.GetVisualDescendants().OfType<Button>(), b => b.IsEffectivelyVisible && b.Content is Avalonia.Controls.Primitives.AccessText { Text: "P_romover" });
+        window.Close();
+    }
+
     [AvaloniaFact]
     public async Task Nexus_answers_stock_question_through_the_planner_tools()
     {
@@ -71,7 +94,8 @@ public class HeadlessUiTests
         const string plan =
             "{\"title\":\"Guardar\",\"rationale\":\"Move da doca.\",\"plan\":{\"dsl_version\":\"1.0\",\"intent\":\"putaway\",\"skill\":\"armazenagem\",\"steps\":[" +
             "{\"op\":\"move_stock\",\"args\":{\"sku\":\"ABC-123\",\"qty\":40,\"from\":\"DOCA-01\",\"to\":\"A-02-01\"}}]}}";
-        var llm = new ScriptedLlmProvider().Call("propose_plan", plan).Reply("Plano pronto.");
+        // First call: the Recipe Matcher (the request mentions the dock and a quantity); it finds no recipe here.
+        var llm = new ScriptedLlmProvider().Reply("{\"receita\": null}").Call("propose_plan", plan).Reply("Plano pronto.");
         using var app = new TestApp(llm: llm);
         var shell = await app.ShellForAsync("op.joao");
         var window = new MainWindow { DataContext = shell };

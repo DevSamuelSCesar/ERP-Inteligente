@@ -5,11 +5,15 @@ using System.Text.Json.Nodes;
 
 namespace erp_inteligente.Models;
 
-/// <summary>Who wrote a draft: the operator in "Novo plano" or the Planner. A draft of the AI runs with AI ∩ user rights.</summary>
+/// <summary>
+/// Who wrote a draft: the operator in "Novo plano", the Planner, or a promoted recipe (feature 7). A draft of the AI runs
+/// with AI ∩ user rights; a recipe draft runs with the requester's rights, like the operator's own.
+/// </summary>
 public enum PlanOrigin
 {
     User,
     Ai,
+    Recipe,
 }
 
 /// <summary>One step of a draft: a catalog operation, its arguments and an optional result name for <c>$references</c>.</summary>
@@ -23,12 +27,16 @@ public sealed class PlanDraft
 {
     public const string DslVersion = "1.0";
 
-    private PlanDraft(string json, PlanOrigin origin, string? skill)
+    private PlanDraft(string json, PlanOrigin origin, string? skill, long? recipeId = null)
     {
         Json = json;
         Origin = origin;
         Skill = skill;
+        RecipeId = origin == PlanOrigin.Recipe ? recipeId : null;
     }
+
+    /// <summary>The recipe the draft was built from (only for <see cref="PlanOrigin.Recipe"/>); stored in <c>plans.recipe_id</c>.</summary>
+    public long? RecipeId { get; }
 
     /// <summary>The DSL document exactly as it will be validated and stored in <c>plans.plan_json</c>.</summary>
     public string Json { get; }
@@ -39,15 +47,17 @@ public sealed class PlanDraft
     public string? Skill { get; }
 
     /// <summary>Wraps a DSL document received as text (e.g. from the Planner); only JSON syntax is checked here.</summary>
-    public static PlanDraft FromJson(string json, PlanOrigin origin = PlanOrigin.User)
+    public static PlanDraft FromJson(string json, PlanOrigin origin = PlanOrigin.User, long? recipeId = null)
     {
+        if (origin == PlanOrigin.Recipe && recipeId is null)
+            throw new ArgumentException("A recipe draft needs the recipe id.", nameof(recipeId));
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         using var document = JsonDocument.Parse(json);
         var skill = document.RootElement.ValueKind == JsonValueKind.Object
                     && document.RootElement.TryGetProperty("skill", out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
-        return new PlanDraft(json, origin, skill);
+        return new PlanDraft(json, origin, skill, recipeId);
     }
 
     /// <summary>Builds a DSL v1 document from typed steps.</summary>

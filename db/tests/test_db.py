@@ -28,9 +28,11 @@ MIGRATION_003 = DB_DIR / "migrations" / "003_full_catalog.sql"
 MIGRATION_004 = DB_DIR / "migrations" / "004_reservations.sql"
 MIGRATION_005 = DB_DIR / "migrations" / "005_skills.sql"
 MIGRATION_006 = DB_DIR / "migrations" / "006_memory.sql"
+MIGRATION_007 = DB_DIR / "migrations" / "007_recipes.sql"
 V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
 V4_SCRIPTS = ("schema_v4.sql", "security_v4.sql", "seed_v4.sql")
 V5_SCRIPTS = ("schema_v5.sql", "security_v5.sql", "seed_v5.sql")
+V6_SCRIPTS = ("schema_v6.sql", "security_v6.sql", "seed_v6.sql")
 # Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
 V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
 V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
@@ -457,6 +459,7 @@ class MigrationTo3Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -616,6 +619,7 @@ class MigrationTo4Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_004.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -663,6 +667,7 @@ class MigrationTo5Tests(unittest.TestCase):
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_005.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -822,6 +827,7 @@ class MigrationTo6Tests(unittest.TestCase):
         for name in V5_SCRIPTS:
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -870,6 +876,95 @@ class MigrationTo6Tests(unittest.TestCase):
             self.migrated.execute("UPDATE memories SET origin = 'system' WHERE id = 1")
         self.assertEqual(self.migrated.execute("SELECT count(*) FROM role_permissions WHERE role_id = 5 "
                                                "AND permission = 'memory.manage' AND effect = 'DENY'").fetchone(), (1,))
+
+
+class MigrationTo7Tests(unittest.TestCase):
+    """A version 6 database upgraded by migrations/007 must match a fresh install, recipe objects included."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        self.migrated.execute("PRAGMA foreign_keys = ON")
+        for name in V6_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+
+    def test_recipes_columns_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('recipes') ORDER BY cid")
+
+    def test_recipe_triggers_view_index_and_permissions_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, sql FROM sqlite_schema WHERE name IN ('recipes_deny_delete', 'recipes_guard_update', "
+            "'recipes_by_signature', 'v_ai_recipes', 'role_permissions_deny_ai_escalation') ORDER BY name")
+        self.assertSameRows("SELECT role_id, permission, effect FROM role_permissions ORDER BY 1, 2, 3")
+
+    def test_seeded_recipe_gets_the_new_values(self):
+        self.assertSameRows("SELECT id, name, status, success_count, failure_count, skill, signature, example_params_json, "
+                            "failure_streak, source_plan_id, promoted_by, created_at FROM recipes ORDER BY id")
+
+
+class RecipeTests(DatabaseTestCase):
+    """recipes: demoted not deleted, fixed template and origin, one recipe per structure, never managed by the AI."""
+
+    def add_recipe(self, name="mover_teste", signature="move_stock(from,qty,sku,to)#2", status="candidate"):
+        return self.conn.execute(
+            "INSERT INTO recipes (name, description, intent, plan_template_json, params_schema_json, dsl_version, "
+            "skill_version, status, signature, created_at) VALUES (?, 'Teste', 'putaway', '{\"steps\":[]}', '{}', '1.0', "
+            "'armazenagem@1', ?, ?, '2026-11-11T10:00:00Z')", (name, status, signature)).lastrowid
+
+    def test_recipes_are_demoted_never_deleted(self):
+        rid = self.add_recipe()
+        self.assertDenied("DELETE FROM recipes WHERE id = ?", (rid,))
+
+    def test_template_parameters_intent_and_origin_are_fixed(self):
+        rid = self.add_recipe()
+        for sql in ("UPDATE recipes SET plan_template_json = '{}' WHERE id = ?",
+                    "UPDATE recipes SET params_schema_json = '{\"type\":\"object\"}' WHERE id = ?",
+                    "UPDATE recipes SET intent = 'outra' WHERE id = ?",
+                    "UPDATE recipes SET signature = 'x' WHERE id = ?",
+                    "UPDATE recipes SET source_plan_id = 1 WHERE id = ?",
+                    "UPDATE recipes SET created_at = '2020-01-01T00:00:00Z' WHERE id = ?"):
+            with self.subTest(sql=sql):
+                self.assertDenied(sql, (rid,))
+        self.conn.execute("UPDATE recipes SET status = 'active', name = 'mover_ok', success_count = 3, "
+                          "failure_streak = 1, status_reason = 'Promovida' WHERE id = ?", (rid,))
+
+    def test_one_recipe_per_structure(self):
+        self.add_recipe()
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add_recipe(name="outro_nome")
+
+    def test_ai_role_cannot_get_recipe_manage(self):
+        # BEFORE INSERT: the trigger fires before the existing DENY row could make it a duplicate.
+        self.assertDenied("INSERT INTO role_permissions (role_id, permission, effect) VALUES (?, 'recipe.manage', 'ALLOW')",
+                          (AI_ROLE_ID,))
+
+    def test_ai_reads_only_active_recipes_with_their_template(self):
+        self.add_recipe()
+        self.conn.commit()  # an open write transaction would make the backup wait forever
+        ai = sqlite3.connect(":memory:")
+        try:
+            self.conn.backup(ai)
+            ai.set_authorizer(ai_authorizer)
+            rows = ai.execute("SELECT name, skill, plan_template_json FROM v_ai_recipes").fetchall()
+            self.assertEqual([r[0] for r in rows], ["armazenar_da_doca"])
+            self.assertIn("$sku", rows[0][2])
+            with self.assertRaises(sqlite3.DatabaseError):
+                ai.execute("SELECT name FROM recipes").fetchall()
+        finally:
+            ai.close()
 
 
 class MemoryTests(DatabaseTestCase):

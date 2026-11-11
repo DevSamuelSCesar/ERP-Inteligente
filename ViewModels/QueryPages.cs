@@ -120,22 +120,6 @@ public sealed class OrdersViewModel(IQueryService queries) : QueryPageViewModel<
     }
 }
 
-public sealed class RecipesViewModel(IQueryService queries) : QueryPageViewModel<RecipeRow>
-{
-    public override string Title => "Receitas";
-    public override string FilterPlaceholder => "Filtrar por nome ou skill";
-
-    protected override Task<IReadOnlyList<RecipeRow>> LoadAsync() => queries.GetRecipesAsync();
-
-    protected override IEnumerable<string> SearchableText(RecipeRow row) => [row.Name, row.Skill, row.Description];
-
-    protected override IEnumerable<SummaryTotal> BuildTotals(IReadOnlyList<RecipeRow> rows)
-    {
-        yield return new("Receitas ativas", rows.Count(r => r.Status == "Ativa").ToString());
-        yield return new("Execuções sem LLM", rows.Sum(r => r.Uses).ToString("N0"));
-    }
-}
-
 public sealed class AuditViewModel(IQueryService queries) : QueryPageViewModel<AuditRow>
 {
     public override string Title => "Auditoria";

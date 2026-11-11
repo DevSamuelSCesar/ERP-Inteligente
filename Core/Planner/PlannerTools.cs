@@ -71,6 +71,7 @@ internal static partial class PlannerTools
         // Not in ReadToolNames: offered only when the Planner has the retrievers / the right (run by the Planner, not by Execute).
         [SearchKnowledge] = (SearchKnowledgeDescription, SearchKnowledgeSchema),
         [SearchMemories] = (SearchMemoriesDescription, SearchMemoriesSchema),
+        [SearchRecipes] = (SearchRecipesDescription, SearchRecipesSchema),
         [Remember] = (RememberDescription, RememberSchema),
         [SearchLocations] = (SearchLocationsDescription, SearchLocationsSchema),
         [SearchZones] = (SearchZonesDescription, SearchZonesSchema),
@@ -100,6 +101,7 @@ internal static partial class PlannerTools
             LoadSkill => $"Lendo a skill {Get("nome")}",
             SearchKnowledge => "Consultando procedimentos",
             SearchMemories => "Consultando memórias",
+            SearchRecipes => "Consultando receitas",
             Remember => "Registrando memória",
             SearchProducts => SearchStatus(args),
             GetProduct => $"Consultando o produto {Get("sku")}",

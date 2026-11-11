@@ -30,10 +30,11 @@ public sealed partial class Planner
     /// The operator's own request: an attempt is audited (the motor still decides what is allowed), but the operator is
     /// not warned about their own words.
     /// </summary>
-    private void ScanRequest(long? aiUserId, UserSession user, string request)
+    private bool ScanRequest(long? aiUserId, UserSession user, string request)
     {
-        if (InjectionDetector.Scan(request) is { } match)
-            Append(aiUserId, user, "ai.injection", "pedido", AuditOutcome.Denied, Details("pedido", null, match.Code));
+        if (InjectionDetector.Scan(request) is not { } match) return false;
+        Append(aiUserId, user, "ai.injection", "pedido", AuditOutcome.Denied, Details("pedido", null, match.Code));
+        return true;
     }
 
     /// <summary>Scans the string values of a tool result; returns the findings (already audited and kept in the state).</summary>

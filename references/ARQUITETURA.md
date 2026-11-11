@@ -177,7 +177,7 @@ O risco do plano é o **maior risco** entre seus passos.
 | Consultas de domínio (`get_stock`, `search_locations`, `search_orders`, `search_partners`...) | Leitura | Respostas compactas e paginadas |
 | `search_memories` | Leitura | Busca memórias além das já injetadas no contexto |
 | `search_knowledge` | Leitura | Busca trechos dos procedimentos (`knowledge/`) |
-| `search_recipes` | Leitura | Busca receitas similares para usar como base |
+| `search_recipes` | Leitura | Busca receitas ativas (com o modelo) para usar como base (feature 7) |
 | `load_skill` | Leitura | Carrega o corpo de uma skill do índice |
 | `propose_skill` | Rascunho (só quem tem `skill.manage`) | Propõe uma skill nova ou uma nova versão; nada é gravado até o supervisor confirmar |
 | `propose_plan` | Escrita (via motor, só simula) | Única porta de entrada para alterar dados; nada é gravado antes da confirmação de quem pediu |
@@ -227,6 +227,18 @@ Uma **receita** é um plano parametrizado que já funcionou. É o principal meca
   - Disparo por linguagem natural: um modelo barato só identifica a receita e extrai os parâmetros.
 - **Validação:** o plano gerado a partir de uma receita passa pelo mesmo Validator, Simulator e Approval de qualquer plano.
 - **Invalidação:** a receita guarda a versão da DSL e da skill. Se uma das duas mudar, a receita fica suspensa até ser revalidada. Receitas que falham repetidamente são despromovidas.
+
+**Implementado na feature 7 (`Core/Recipes`, migração 007):**
+- **Estados:** `candidate` → `active` → `suspended` ou `demoted`. Receitas nunca são apagadas; o modelo, os parâmetros, a intenção, a assinatura e a origem não mudam depois de gravados (triggers).
+- **Assinatura:** um texto por passo, `op(arg,...)` com os argumentos em ordem, e as referências a passos trocadas pela posição (`zone=@1`). Dois planos com a mesma estrutura têm a mesma assinatura, e há no máximo uma receita por assinatura.
+- **Candidata:** depois de cada plano executado que não veio de receita, o motor conta os planos executados com a mesma assinatura (últimos 200). No 3º, cria a candidata: cada valor literal vira um parâmetro obrigatório, tipado pelo JSON Schema da operação, e os valores desse plano ficam como exemplo. É uma ação do sistema, auditada como `recipe.candidate`.
+- **Promoção:** só com `recipe.manage` (supervisor). O nome segue `^[a-z][a-z0-9_]{2,39}$`; a descrição tem de 10 a 300 caracteres e não pode ter cara de instrução nem dado pessoal, porque vai para o prompt do Matcher.
+- **Modelo:** um `"$nome"` é parâmetro quando `nome` está no schema de parâmetros; qualquer outro `"$x"` continua sendo referência a passo. A extração garante que os dois nomes nunca coincidam.
+- **Uso pela UI:** a tela Receitas preenche os valores, valida pelo schema da receita, pré-visualiza e envia pelo motor com `planned_by = 'recipe'` e `recipe_id`. O plano roda com os direitos de quem pediu, como um plano feito à mão, e críticos esperam outro supervisor.
+- **Recipe Matcher:** antes do Planner, só quando o pedido tem um valor (dígito) e uma palavra em comum com o nome ou a descrição de uma receita ativa ao alcance dos direitos IA ∩ usuário, e nunca quando o pedido parece injeção. Uma chamada ao `deepseek-flash`, sem ferramentas, com as receitas em `<dados fonte="receitas">`, devolve `{receita, parametros}`. O código aceita só uma receita oferecida e valores que passam no schema; o plano é simulado e vira **uma proposta** que quem pediu confirma. Na dúvida, segue o Planner normal. Auditado como `ai.recipe_match`.
+- **`search_recipes`:** ferramenta de leitura sobre `v_ai_recipes` (só ativas, com o modelo), para o Planner usar uma receita como base de um `propose_plan`.
+- **Contagem:** sucesso zera a sequência de falhas; falha ou rejeição soma. 3 falhas seguidas despromovem (`recipe.demote` do sistema).
+- **Revalidação:** a lista de receitas suspende as ativas cuja versão da DSL ou da skill mudou. Reativar (supervisor) confere os valores de exemplo com o parser e os schemas da DSL atual e grava a versão atual da skill.
 
 ---
 

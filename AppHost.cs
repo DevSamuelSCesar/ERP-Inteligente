@@ -10,6 +10,7 @@ using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Memory;
 using erp_inteligente.Core.Planner;
 using erp_inteligente.Core.Policy;
+using erp_inteligente.Core.Recipes;
 using erp_inteligente.Core.Security;
 using erp_inteligente.Core.Skills;
 using erp_inteligente.Services;
@@ -37,7 +38,9 @@ public sealed class AppHost : IDisposable
         Auth = new AuthService(database, new PasswordHasher(passwordParameters), Policy, AuditLog, time, authOptions);
         Session = new SessionService(Auth, time, authOptions);
         MemoryStore = new MemoryStore(database, Policy, AuditLog, time);
-        Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore);
+        var skills = new SkillCatalog(database);
+        RecipeStore = new RecipeStore(database, Policy, AuditLog, time, skills);
+        Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore, RecipeStore);
         LlmSettings = new LlmSettings(secrets, database.Path);
         var deepSeek = llm is null ? new DeepSeekProvider(DeepSeekProvider.CreateDefaultHandler(), LlmSettings.ReadKey) : null;
         Llm = llm ?? deepSeek!;
@@ -46,8 +49,9 @@ public sealed class AppHost : IDisposable
         SyncKnowledge(database);
         MemoryRetriever = new MemoryRetriever(database, Policy);
         KnowledgeRetriever = new KnowledgeRetriever(database);
-        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: new SkillCatalog(database),
-            memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever);
+        Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: skills,
+            memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever,
+            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog));
         SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
     }
@@ -66,6 +70,7 @@ public sealed class AppHost : IDisposable
     public Planner Planner { get; }
     public SkillStore SkillStore { get; }
     public MemoryStore MemoryStore { get; }
+    public RecipeStore RecipeStore { get; }
     public MemoryRetriever MemoryRetriever { get; }
     public KnowledgeRetriever KnowledgeRetriever { get; }
 
@@ -109,7 +114,8 @@ public sealed class AppHost : IDisposable
             $"{Database.Path} (criptografado com SQLCipher)",
             LlmSettingsService,
             new SqliteSkillService(SkillStore, Session),
-            new SqliteMemoryService(MemoryStore, Session));
+            new SqliteMemoryService(MemoryStore, Session),
+            new SqliteRecipeService(RecipeStore, Session));
 
     public void Dispose() => Database.Dispose();
 }

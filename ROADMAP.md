@@ -58,8 +58,17 @@ Delimitação de conteúdo externo no prompt, relato de instruções suspeitas, 
 - `Core/Safety/SensitiveDataRedactor` mascara CPF, CNPJ, e-mail, telefone, chaves de API, tokens e pares `senha=` no alvo e nos detalhes da auditoria antes do hash.
 - Suíte de 25 ataques (`PromptInjectionSuiteTests`) com o modelo roteirizado no pior caso (obedece à injeção): **0% de sucesso e 100% de detecção**. Sem falso positivo nos 22 documentos de `knowledge/` nem nos produtos do seed (exceto `TST-INJ-01`).
 
-### 7. Receitas
+### 7. Receitas ✅
 Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com modelo barato, disparo direto pela UI sem LLM, invalidação por versão da DSL/skill e despromoção por falhas.
+*Estado:* concluída em 2026-11-11.
+- Código em `Core/Recipes`: `RecipeTemplate` (assinatura da estrutura, extração do modelo e dos parâmetros, preenchimento), `RecipeStore` (aprendizado, promoção, uso, suspensão e despromoção, tudo auditado como `recipe.*`) e `RecipeMatcher`.
+- **Aprendizado:** 3 planos executados com a mesma estrutura (fora de receitas) viram uma receita **candidata**. Cada valor literal vira um parâmetro tipado pelo schema da operação.
+- **Promoção:** só o supervisor (`recipe.manage`; a IA é barrada por trigger) dá nome e descrição. A descrição passa pelo detector de injeção, porque entra no prompt do Matcher.
+- **Uso sem LLM:** na tela Receitas, quem tem `plan.submit` preenche os valores, pré-visualiza e envia. O plano vai ao motor com origem `recipe` e `recipe_id`.
+- **Recipe Matcher:** antes do Planner, uma chamada ao `deepseek-flash`, sem ferramentas, escolhe a receita e extrai os valores. Ela só acontece quando o pedido tem um valor e uma palavra em comum com alguma receita ativa, e nunca para pedido suspeito de injeção. Na dúvida, segue o Planner normal. O Planner também ganhou `search_recipes`.
+- **Invalidação:** a receita é suspensa quando muda a versão da DSL ou da skill, e o supervisor a reativa revalidando os valores de exemplo. 3 falhas seguidas (rejeição conta) despromovem a receita.
+- Migração 007 (schema na versão 7).
+- **Pendente:** modelo por papel configurável e o fine-tuning do Matcher continuam na feature 8.
 
 ## Evolução
 

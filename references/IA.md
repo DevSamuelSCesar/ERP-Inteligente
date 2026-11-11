@@ -17,6 +17,7 @@ DeepSeek e OpenAI continuam suportados pela interface `ILlmProvider` e podem ser
 - **Chave:** digitada pelo administrador e guardada no cofre do SO.
 - **Limites por pedido:** 4 planos inválidos, 12 rodadas, 3 propostas válidas, 8.192 tokens por chamada e 60.000 por pedido. Passou do limite, a tarefa é escalada ao operador, salvo quando já há propostas válidas: essas são entregues. É a defesa contra "custo descontrolado" da seção 5.
 - **Direitos:** a IA tem os direitos operacionais do usuário que pede (decisão de 2026-11-08). Ver [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 3.1.
+- **Recipe Matcher (feature 7):** enquanto só a DeepSeek está pronta, o Matcher usa sempre o `deepseek-flash`, numa chamada sem ferramentas de até 600 tokens de resposta, no lugar do Haiku. Um filtro sem LLM evita a chamada quando o pedido não tem valor nem palavra em comum com uma receita ativa. Escolher o modelo por papel é da feature 8.
 
 **Privacidade:** o que sai da máquina é sempre não sensível (views `v_ai_*`, procedimentos fictícios e memórias filtradas). Por isso a escolha do provedor afeta custo e qualidade, mas não expõe CPF, contatos ou custos. Quem quiser zero envio de dados pode usar o modelo do fine-tuning e embeddings locais para receitas e RAG; o Planner ainda depende de um provedor.
 
