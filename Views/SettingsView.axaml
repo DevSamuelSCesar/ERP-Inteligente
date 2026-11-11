@@ -26,48 +26,87 @@
                 <TextBlock Classes="boardTitle" Text="Provedor de LLM" Margin="0,22,0,10" />
                 <Rectangle Classes="rule" />
 
-                <Grid ColumnDefinitions="200,*" Margin="0,10">
-                    <TextBlock Classes="label" Text="Provedor" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding ProviderName}" />
-                </Grid>
-                <Rectangle Classes="rule" />
+                <!-- Key state of every provider -->
+                <ItemsControl ItemsSource="{Binding ProviderRows}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ProviderStatusRow">
+                            <StackPanel>
+                                <Grid ColumnDefinitions="200,*" Margin="0,10">
+                                    <TextBlock Classes="label" Text="{Binding Name}" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                        <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14"
+                                                  IsVisible="{Binding IsConfigured}" />
+                                        <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Width="14" Height="14"
+                                                  IsVisible="{Binding !IsConfigured}" />
+                                        <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                                <Rectangle Classes="rule" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
-                <Grid ColumnDefinitions="200,*" Margin="0,10">
-                    <TextBlock Classes="label" Text="Chave de API" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <PathIcon Classes="success" Data="{StaticResource Icon.Accept}" Width="14" Height="14"
-                                  IsVisible="{Binding IsKeyConfigured}" />
-                        <PathIcon Classes="warning" Data="{StaticResource Icon.Warning}" Width="14" Height="14"
-                                  IsVisible="{Binding !IsKeyConfigured}" />
-                        <TextBlock Text="{Binding KeyStatusText}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                    </StackPanel>
-                </Grid>
-                <Rectangle Classes="rule" />
+                <TextBlock Classes="secondary" Margin="0,10,0,0" Text="{Binding KeyStatusText}" TextWrapping="Wrap"
+                           IsVisible="{Binding IsReadOnlyLlm}" />
 
                 <StackPanel IsVisible="{Binding CanConfigure}">
-                    <Grid ColumnDefinitions="200,Auto,Auto,Auto" Margin="0,10">
+                    <Grid ColumnDefinitions="200,Auto,Auto,Auto,Auto,Auto" Margin="0,10">
                         <TextBlock Classes="label" Text="Nova chave" VerticalAlignment="Center" />
-                        <TextBox Name="ApiKeyBox" Grid.Column="1" Width="420"
-                                 Text="{Binding ApiKey}" PasswordChar="●" MaxLength="200" PlaceholderText="sk-..."
+                        <ComboBox Grid.Column="1" MinWidth="170" ItemsSource="{Binding KeyProviders}"
+                                  SelectedItem="{Binding SelectedKeyProvider}" IsEnabled="{Binding !IsWorking}" />
+                        <TextBox Name="ApiKeyBox" Grid.Column="2" Width="340" Margin="8,0,0,0"
+                                 Text="{Binding ApiKey}" PasswordChar="●" MaxLength="200" PlaceholderText="chave de API"
                                  IsEnabled="{Binding !IsWorking}" />
-                        <Button Grid.Column="2" Classes="primary" Margin="10,0,0,0" Command="{Binding SaveKeyCommand}"
+                        <Button Grid.Column="3" Classes="primary" Margin="10,0,0,0" Command="{Binding SaveKeyCommand}"
                                 ToolTip.Tip="Salvar no cofre do sistema (Alt+S)">
                             <AccessText Text="_Salvar" />
                         </Button>
-                        <Button Grid.Column="3" Classes="neutral" Margin="8,0,0,0" Command="{Binding ClearKeyCommand}"
+                        <Button Grid.Column="4" Classes="neutral" Margin="8,0,0,0" Command="{Binding ClearKeyCommand}"
                                 ToolTip.Tip="Remover a chave do cofre">
                             <TextBlock Text="Remover" />
                         </Button>
+                        <Button Grid.Column="5" Classes="neutral" Margin="8,0,0,0" Command="{Binding TestCommand}"
+                                ToolTip.Tip="Faz uma chamada mínima ao provedor escolhido (Alt+T)">
+                            <AccessText Text="_Testar" />
+                        </Button>
                     </Grid>
                     <Rectangle Classes="rule" />
+                </StackPanel>
 
-                    <Grid ColumnDefinitions="200,Auto,Auto" Margin="0,10">
-                        <TextBlock Classes="label" Text="Modelo" VerticalAlignment="Center" />
-                        <ComboBox Grid.Column="1" MinWidth="220" ItemsSource="{Binding Models}"
-                                  SelectedItem="{Binding SelectedModel}" IsEnabled="{Binding !IsWorking}" />
-                        <Button Grid.Column="2" Classes="neutral" Margin="10,0,0,0" Command="{Binding TestCommand}"
-                                ToolTip.Tip="Faz uma chamada mínima à DeepSeek (Alt+T)">
-                            <AccessText Text="_Testar conexão" />
+                <!-- Model per role (references/ARQUITETURA.md, section 10) -->
+                <TextBlock Classes="boardTitle" Text="Modelo por papel" Margin="0,22,0,10" />
+                <Rectangle Classes="rule" />
+                <Grid ColumnDefinitions="200,Auto,Auto" Margin="0,10">
+                    <TextBlock Classes="label" Text="Planejamento" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinWidth="170" ItemsSource="{Binding PlannerProviders}"
+                              SelectedItem="{Binding PlannerProvider}" IsEnabled="{Binding CanConfigure}" />
+                    <ComboBox Grid.Column="2" MinWidth="220" Margin="8,0,0,0" ItemsSource="{Binding PlannerModels}"
+                              SelectedItem="{Binding PlannerModel}" IsEnabled="{Binding CanConfigure}" />
+                </Grid>
+                <Rectangle Classes="rule" />
+                <Grid ColumnDefinitions="200,Auto,Auto" Margin="0,10">
+                    <TextBlock Classes="label" Text="Receitas (Matcher)" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinWidth="170" ItemsSource="{Binding MatcherProviders}"
+                              SelectedItem="{Binding MatcherProvider}" IsEnabled="{Binding CanConfigure}" />
+                    <ComboBox Grid.Column="2" MinWidth="220" Margin="8,0,0,0" ItemsSource="{Binding MatcherModels}"
+                              SelectedItem="{Binding MatcherModel}" IsEnabled="{Binding CanConfigure}" />
+                </Grid>
+                <Rectangle Classes="rule" />
+
+                <!-- Local fine-tuned model (loopback only) -->
+                <StackPanel IsVisible="{Binding CanConfigure}">
+                    <Grid ColumnDefinitions="200,Auto,Auto,Auto,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Modelo local" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="http://127.0.0.1:" VerticalAlignment="Center" />
+                        <TextBox Grid.Column="2" Width="90" Text="{Binding LocalPortText}" MaxLength="5" PlaceholderText="8080" />
+                        <Button Grid.Column="3" Classes="neutral" Margin="8,0,0,0" Command="{Binding SaveLocalPortCommand}"
+                                ToolTip.Tip="Salvar a porta do servidor local">
+                            <TextBlock Text="Salvar porta" />
+                        </Button>
+                        <Button Grid.Column="4" Classes="neutral" Margin="8,0,0,0" HorizontalAlignment="Left"
+                                Command="{Binding TestLocalCommand}" ToolTip.Tip="Faz uma chamada mínima ao modelo local">
+                            <TextBlock Text="Testar modelo local" />
                         </Button>
                     </Grid>
                     <Rectangle Classes="rule" />

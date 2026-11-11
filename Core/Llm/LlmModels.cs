@@ -28,6 +28,12 @@ public sealed record LlmMessage
     /// <summary>Id of the call a <see cref="LlmRole.Tool"/> message answers.</summary>
     public string? ToolCallId { get; init; }
 
+    /// <summary>
+    /// Provider-specific copy of an assistant turn that must be sent back unchanged (Claude's content blocks, with the
+    /// signed thinking blocks). Opaque to everything but the provider that produced it; null for the others.
+    /// </summary>
+    public object? ProviderState { get; init; }
+
     public static LlmMessage System(string content) => new() { Role = LlmRole.System, Content = content };
     public static LlmMessage User(string content) => new() { Role = LlmRole.User, Content = content };
 
@@ -38,20 +44,40 @@ public sealed record LlmMessage
     public static LlmMessage Assistant(LlmResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
-        return Assistant(response.Content, response.ToolCalls, response.ReasoningContent);
+        return Assistant(response.Content, response.ToolCalls, response.ReasoningContent) with { ProviderState = response.ProviderState };
     }
 
     public static LlmMessage ToolResult(string toolCallId, string content)
         => new() { Role = LlmRole.Tool, ToolCallId = toolCallId, Content = content };
 }
 
-/// <summary>A completion request. <see cref="Temperature"/> is ignored by the provider when null.</summary>
+/// <summary>The LLM providers the app talks to (references/STACK.md). <see cref="Local"/> is the fine-tuned Matcher on this machine.</summary>
+public enum LlmProviderKind { DeepSeek, Claude, OpenAI, Local }
+
+/// <summary>What a model is used for (references/ARQUITETURA.md, section 10: a model per role).</summary>
+public enum LlmUseRole
+{
+    /// <summary>Plans with tools and handles exceptions: the strong model.</summary>
+    Planner,
+
+    /// <summary>Recognises a recipe and extracts its values (Recipe Matcher): the cheap model.</summary>
+    Matcher,
+}
+
+/// <summary>A provider and one of its models.</summary>
+public sealed record LlmChoice(LlmProviderKind Provider, string Model);
+
+/// <summary>
+/// A completion request. <see cref="Temperature"/> is ignored by the provider when null. <see cref="Provider"/> chooses the
+/// adapter when the request goes through <see cref="LlmRouter"/>; null means DeepSeek, as before multi-provider support.
+/// </summary>
 public sealed record LlmRequest(
     string Model,
     IReadOnlyList<LlmMessage> Messages,
     IReadOnlyList<LlmTool> Tools,
     int MaxTokens,
-    double? Temperature = null);
+    double? Temperature = null,
+    LlmProviderKind? Provider = null);
 
 public sealed record LlmUsage(int PromptTokens, int CompletionTokens);
 
@@ -60,7 +86,11 @@ public sealed record LlmResponse(
     IReadOnlyList<LlmToolCall> ToolCalls,
     string? ReasoningContent,
     LlmFinishReason FinishReason,
-    LlmUsage Usage);
+    LlmUsage Usage)
+{
+    /// <summary>See <see cref="LlmMessage.ProviderState"/>.</summary>
+    public object? ProviderState { get; init; }
+}
 
 public enum LlmErrorKind { Unauthorized, RateLimited, Unavailable, InvalidResponse, Timeout, NotConfigured }
 

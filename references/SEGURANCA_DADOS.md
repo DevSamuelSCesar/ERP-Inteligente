@@ -257,6 +257,7 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 | Dado hostil fechando o bloco `<dados>` | `PlannerTests` (C#) | Automatizado ✅ |
 | Plano da IA com operação fora do direito IA ∩ usuário (ajuste por um supervisor) | `PlanEngineTests` e `PlannerTests` (C#) | Automatizado ✅ |
 | Chave de API em mensagens de erro ou na auditoria | `DeepSeekProviderTests` e `SettingsViewModelTests` (C#) | Automatizado ✅ |
+| Multi-provedor: chave do Claude/OpenAI em erros (401, 403, 429, 529, 400), chave de um provedor usada por outro, modelo local fora de `127.0.0.1` ou com chave, modelo local no planejamento, troca de modelo por quem não é administrador | `MultiProviderTests`, `ModelPerRoleTests` e `SettingsViewModelTests` (C#) | Automatizado ✅ |
 | CPF, CNPJ, e-mail, telefone, chave ou senha chegando à auditoria (mascarados antes do hash, cadeia válida) | `SensitiveDataRedactorTests` (C#) | Automatizado ✅ |
 | Dado hostil marcado, auditado como `ai.injection` e avisado; mensagens próprias e argumentos ecoados não são examinados | `InjectionDefenseTests` e `InjectionDetectorTests` (C#) | Automatizado ✅ |
 | Suíte de 25 ataques de prompt injection, exfiltração e SQL injection com métricas | `PromptInjectionSuiteTests` (C#) | Automatizado ✅ |
@@ -264,5 +265,5 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 
 ```bash
 python3 -m unittest discover -s db/tests -v   # 103 testes
-dotnet test tests/Nexus.Tests                 # 1321 testes do app
+dotnet test tests/Nexus.Tests                 # 1342 testes do app
 ```

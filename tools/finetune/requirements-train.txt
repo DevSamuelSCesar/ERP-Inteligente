@@ -1,0 +1,7 @@
+﻿# Only for train_lora.py and predict_claude.py; the dataset generator and the evaluator use the standard library.
+anthropic
+torch>=2.4
+transformers>=4.46
+datasets>=3.0
+peft>=0.13
+trl>=0.12

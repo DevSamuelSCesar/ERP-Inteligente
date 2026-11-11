@@ -72,8 +72,21 @@ Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com mod
 
 ## Evolução
 
-### 8. Multi-provedor e fine-tuning
+### 8. Multi-provedor e fine-tuning ✅
 Adaptadores Claude e OpenAI (a DeepSeek entrou na feature 3), modelo por papel configurável e experimento de fine-tuning do Matcher, que só substitui o Haiku se empatar ou superar no *exact match*.
+*Estado:* código pronto em 2026-11-11; o treino e a comparação com o Haiku dependem de GPU e de chave e ainda não foram rodados.
+- **Provedores:**
+  - Claude (Anthropic), pelo SDK oficial `Anthropic`, com o thinking assinado devolvido no laço de ferramentas;
+  - OpenAI (`max_completion_tokens`);
+  - modelo local (servidor compatível com OpenAI, só em `127.0.0.1`, sem chave).
+  - DeepSeek e OpenAI dividem o mesmo cliente de *chat completions*. Um roteador manda cada pedido ao provedor certo.
+- **Modelo por papel:** em Configurações, o administrador guarda uma chave por provedor e escolhe provedor e modelo do planejamento e do Matcher. O modelo local só serve ao Matcher. O padrão continua DeepSeek nos dois papéis, então quem não mexe nada não percebe a mudança.
+- **Fine-tuning (`tools/finetune`):**
+  - gerador do conjunto sintético (500 pedidos, 400/100, 15% fora do escopo, com o mesmo prompt de sistema do app);
+  - avaliação com a regra de adoção (empata ou supera o Haiku no *exact match* e tem ≥ 99% de JSON válido);
+  - linha de base com Haiku 5.5 *few-shot*, treino LoRA do Qwen2.5-1.5B-Instruct e previsões do modelo servido localmente.
+  - O Matcher aceita o formato de resposta do conjunto (`{intent, recipe, params}`).
+- **Pendente:** rodar o treino (precisa de GPU) e a linha de base (precisa da chave da Anthropic), e registrar os números no `IA.md`.
 
 ### 9. Operação
 Backup criptografado pela API do SQLite, job de manutenção de memórias, painel de auditoria e de custos de tokens, e instaladores por plataforma.

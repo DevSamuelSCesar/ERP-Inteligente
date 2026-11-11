@@ -13,11 +13,15 @@
 DeepSeek e OpenAI continuam suportados pela interface `ILlmProvider` e podem ser escolhidos na configuração.
 
 **Estado da implementação (feature 3):** o primeiro adaptador implementado é o da **DeepSeek**.
-- **Modelos:** `deepseek-v4-pro` no Planner por padrão, ou `deepseek-flash`, escolhidos em Configurações. Claude e OpenAI entram na feature 8.
+- **Modelos:** `deepseek-v4-pro` no Planner por padrão, ou `deepseek-flash`, escolhidos em Configurações. Claude e OpenAI entraram na feature 8 (abaixo).
 - **Chave:** digitada pelo administrador e guardada no cofre do SO.
 - **Limites por pedido:** 4 planos inválidos, 12 rodadas, 3 propostas válidas, 8.192 tokens por chamada e 60.000 por pedido. Passou do limite, a tarefa é escalada ao operador, salvo quando já há propostas válidas: essas são entregues. É a defesa contra "custo descontrolado" da seção 5.
 - **Direitos:** a IA tem os direitos operacionais do usuário que pede (decisão de 2026-11-08). Ver [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 3.1.
-- **Recipe Matcher (feature 7):** enquanto só a DeepSeek está pronta, o Matcher usa sempre o `deepseek-flash`, numa chamada sem ferramentas de até 600 tokens de resposta, no lugar do Haiku. Um filtro sem LLM evita a chamada quando o pedido não tem valor nem palavra em comum com uma receita ativa. Escolher o modelo por papel é da feature 8.
+- **Recipe Matcher (feature 7):** uma chamada sem ferramentas, de até 600 tokens de resposta. Um filtro sem LLM evita a chamada quando o pedido não tem valor nem palavra em comum com uma receita ativa.
+- **Multi-provedor (feature 8):** Claude (pelo SDK oficial `Anthropic`), OpenAI e um modelo local estão implementados. O administrador escolhe provedor e modelo de cada papel em Configurações:
+  - Planejamento: `deepseek-v4-pro` ou `deepseek-flash`; `claude-sonnet-5-5`, `claude-opus-5-5` ou `claude-haiku-5-5`; `gpt-5` ou `gpt-5-mini`.
+  - Matcher: os mesmos, mais o modelo local ajustado (`nexus-matcher`).
+  - O padrão continua `deepseek-v4-pro` no planejamento e `deepseek-flash` no Matcher, para não mudar o custo de quem já usa o app. Para seguir a tabela acima, escolha Claude Sonnet 5.5 e Claude Haiku 5.5.
 
 **Privacidade:** o que sai da máquina é sempre não sensível (views `v_ai_*`, procedimentos fictícios e memórias filtradas). Por isso a escolha do provedor afeta custo e qualidade, mas não expõe CPF, contatos ou custos. Quem quiser zero envio de dados pode usar o modelo do fine-tuning e embeddings locais para receitas e RAG; o Planner ainda depende de um provedor.
 
@@ -108,6 +112,7 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 | Métricas | *Exact match* do JSON; F1 por campo; % de JSON válido; acerto em "nenhuma receita" |
 | Linha de base | Claude Haiku 5.5 com *few-shot* no mesmo conjunto de teste |
 | Critério de adoção | Substitui o Haiku se empatar ou superar no *exact match* e tiver ≥ 99% de JSON válido |
+| Ferramentas (feature 8) | `tools/finetune`, ver o `README.md` de lá. O gerador e a avaliação estão testados (`tools/tests/test_finetune.py`). **Resultados ainda não medidos:** o treino precisa de GPU e a linha de base precisa da chave da Anthropic |
 
 Exemplo de par de treino:
 

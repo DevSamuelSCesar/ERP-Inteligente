@@ -20,7 +20,12 @@ O app C# (Avalonia, MVVM com CommunityToolkit.Mvvm) tem a interface completa e o
   - DSL v1 (`DslParser`) e JSON Schemas em `Core/Engine/Schemas/v1`.
   - Regras por operação (`*Handler`), `PlanSimulator` (rollback), `PlanExecutor` e `PlanEngine` (máquina de estados).
   - Planos com origem `ai` rodam com os direitos IA ∩ usuário. A IA tem os direitos operacionais do usuário (decisão de 2026-11-08): toda proposta exige Confirmar de quem pediu e críticos exigem outro supervisor; aprovar, ler dados sensíveis, gerir usuários e papéis e ler a auditoria continuam proibidos.
-- `Llm`: `ILlmProvider` e `DeepSeekProvider` (URL fixa). `LlmSettings` guarda a chave e o modelo no cofre do SO (feature 3).
+- `Llm` (features 3 e 8): `ILlmProvider` e os adaptadores:
+  - `DeepSeekProvider`, `OpenAiProvider` e `LocalProvider` (só `127.0.0.1`, sem chave, para o Matcher ajustado por fine-tuning) herdam de `ChatCompletionsProvider` (URL fixa, sem redirecionamento);
+  - `ClaudeProvider` usa o SDK oficial `Anthropic` (NuGet), devolve os blocos originais da resposta em `ProviderState` (thinking assinado volta inalterado no laço de ferramentas) e junta resultados de ferramenta seguidos numa só mensagem;
+  - `LlmRouter` escolhe o adaptador por `LlmRequest.Provider` (nulo = DeepSeek);
+  - `LlmSettings` guarda no cofre do SO uma chave por provedor, o provedor e o modelo de cada papel (`LlmUseRole.Planner` e `Matcher`; o modelo local só serve ao Matcher) e a porta do modelo local. Os membros sem provedor continuam sendo os da DeepSeek. Nos testes, a chave nunca vai para a API real: há `HttpMessageHandler` falso.
+- `tools/finetune`: experimento do Matcher (feature 8), com gerador do conjunto sintético (lê o mesmo `Core/Recipes/Prompts/matcher.md` que o app embute), avaliação (*exact match*, F1 por campo, JSON válido, "nenhuma receita" e a regra de adoção), linha de base com Haiku 5.5 (SDK Python `anthropic`), treino LoRA e previsões do modelo local.
 - `Planner`: laço de tool calling com 8 ferramentas de leitura sobre `v_ai_*` (`search_*` e `get_*`), `load_skill` (corpo sob demanda, até 3), `propose_plan` (até 3 alternativas, só simula), `propose_skill` (só para quem tem `skill.manage`), `offer_options` (botões) e o prompt de sistema em `Core/Planner/Prompts/system.md`, que leva só o índice das skills.
 - `Skills` (feature 4): `SkillDocument` (formato `SKILL.md` em pt-BR: `nome`, `descricao`, `operacoes`), `BuiltInSkills` (as 6 de `skills/`, embutidas), `SkillStore` (banco, versões, auditoria, exige `skill.manage`) e `SkillCatalog` (índice e carga para a IA via `v_ai_skills`). A tela Skills mostra tudo; só o supervisor cria e edita.
 - `Recipes` (feature 7): `RecipeTemplate` (assinatura `op(arg,...)` por passo, extração de parâmetros tipados pelos schemas da DSL; em um modelo, `"$nome"` é parâmetro quando `nome` está no schema de parâmetros, senão é referência a passo), `RecipeStore` (candidata após 3 planos iguais executados, promoção e gestão só com `recipe.manage`, suspensão por versão de DSL/skill, despromoção após 3 falhas seguidas) e `RecipeMatcher` (chamada curta ao `deepseek-flash` antes do Planner, com filtro barato antes). O `PlanEngine` recebe o `RecipeStore` e, depois de cada decisão, conta o uso da receita ou aprende com o plano executado. A tela Receitas usa receitas sem LLM.
@@ -43,7 +48,9 @@ python3 -m unittest db.tests.test_db.SqlInjectionTests -v          # uma classe 
 python3 -m unittest db.tests.test_db.AiConnectionTests.test_ai_cannot_write
 sqlite3 /tmp/erp.db < db/schema.sql && sqlite3 /tmp/erp.db < db/security.sql && sqlite3 /tmp/erp.db < db/seed.sql
 python3 tools/readme_to_pdf.py -o /tmp/README.pdf                  # README → PDF (Chrome/Chromium headless)
-python3 -m unittest discover -s tools/tests -v                     # testes do conversor
+python3 -m unittest discover -s tools/tests -v                     # testes do conversor e do fine-tuning
+python3 tools/finetune/generate_dataset.py                         # conjunto do Matcher: 400 treino / 100 teste
+python3 tools/finetune/evaluate.py --gold tools/finetune/data/test.jsonl --pred P.jsonl --baseline B.jsonl
 dotnet build                                                       # app (sem avisos)
 dotnet run                                                         # abre o app (banco em ~/.local/share/Nexus/nexus.db)
 dotnet run -- --db /tmp/nexus.db                                   # banco alternativo (criado no primeiro uso, chaves no cofre do SO)

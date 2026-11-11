@@ -179,7 +179,7 @@ public sealed partial class Planner(
             try
             {
                 response = await llm.CompleteAsync(
-                    new LlmRequest(settings.Model, messages.ToArray(), tools, _options.MaxTokensPerCall), ct);
+                    PlannerRequest(messages.ToArray(), tools), ct);
             }
             catch (LlmException ex)
             {
@@ -248,7 +248,7 @@ public sealed partial class Planner(
             try
             {
                 var response = await llm.CompleteAsync(
-                    new LlmRequest(settings.Model, messages.ToArray(), [], _options.MaxTokensPerCall), ct);
+                    PlannerRequest(messages.ToArray(), []), ct);
                 if (response.ToolCalls.Count == 0 && CleanText(response.Content) is { Length: > 0 } cleaned)
                 {
                     text = cleaned;
@@ -956,13 +956,31 @@ public sealed partial class Planner(
     private PlannerEscalated BudgetExceeded() =>
         new("O pedido consumiu o limite de processamento do Nexus. Tente de novo com um pedido mais específico.");
 
-    private static string MessageFor(LlmErrorKind kind) => kind switch
+    private string MessageFor(LlmErrorKind kind)
     {
-        LlmErrorKind.NotConfigured => "Configure a chave da DeepSeek em Configurações (administrador).",
-        LlmErrorKind.Unauthorized => "A chave da DeepSeek foi recusada. Peça ao administrador para conferi-la em Configurações.",
-        LlmErrorKind.InvalidResponse => "O provedor devolveu uma resposta inválida. Tente de novo.",
-        _ => "O provedor de IA está indisponível no momento. Tente de novo em instantes.",
+        var provider = KeyHolder(settings.ChoiceFor(LlmUseRole.Planner).Provider);
+        return kind switch
+        {
+            LlmErrorKind.NotConfigured => $"Configure a chave da {provider} em Configurações (administrador).",
+            LlmErrorKind.Unauthorized => $"A chave da {provider} foi recusada. Peça ao administrador para conferi-la em Configurações.",
+            LlmErrorKind.InvalidResponse => "O provedor devolveu uma resposta inválida. Tente de novo.",
+            _ => "O provedor de IA está indisponível no momento. Tente de novo em instantes.",
+        };
+    }
+
+    private static string KeyHolder(LlmProviderKind provider) => provider switch
+    {
+        LlmProviderKind.Claude => "Anthropic (Claude)",
+        LlmProviderKind.OpenAI => "OpenAI",
+        _ => "DeepSeek",
     };
+
+    /// <summary>The planning request: the model and provider configured for the Planner role (feature 8).</summary>
+    private LlmRequest PlannerRequest(IReadOnlyList<LlmMessage> messages, IReadOnlyList<LlmTool> tools)
+    {
+        var choice = settings.ChoiceFor(LlmUseRole.Planner);
+        return new LlmRequest(choice.Model, messages, tools, _options.MaxTokensPerCall, Provider: choice.Provider);
+    }
 
     private static string Wrap(string source, string json, bool suspicious = false) =>
         suspicious ? $"<dados fonte=\"{source}\" {SuspiciousAttribute}>{json}</dados>" : $"<dados fonte=\"{source}\">{json}</dados>";

@@ -1,0 +1,34 @@
+[
+  {
+    "nome": "armazenar_da_doca",
+    "intent": "putaway",
+    "descricao": "Move a quantidade recebida de um SKU da doca para o endereço livre mais próximo",
+    "parametros": {
+      "sku": "string: SKU (ex.: ABC-123)",
+      "qty": "integer: quantidade (ex.: 40)",
+      "dock": "string: doca (ex.: DOCA-01)",
+      "target": "string: endereço de destino (ex.: A-01-01)"
+    }
+  },
+  {
+    "nome": "receber_na_doca",
+    "intent": "receive",
+    "descricao": "Registra a entrada de um SKU sem lote numa doca",
+    "parametros": {
+      "sku": "string: SKU (ex.: FER-010)",
+      "qty": "integer: quantidade (ex.: 12)",
+      "location": "string: endereço (ex.: DOCA-02)"
+    }
+  },
+  {
+    "nome": "baixar_avaria",
+    "intent": "adjust",
+    "descricao": "Dá baixa de unidades avariadas de um SKU num endereço, com o motivo",
+    "parametros": {
+      "sku": "string: SKU (ex.: LIM-201)",
+      "qty": "integer: quantidade (ex.: -2)",
+      "location": "string: endereço (ex.: B-01-01)",
+      "reason": "string: motivo (ex.: Avaria: embalagem rasgada)"
+    }
+  }
+]

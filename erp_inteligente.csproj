@@ -27,6 +27,7 @@
   <!-- System prompt of the Planner (Core/Planner) -->
   <ItemGroup>
     <EmbeddedResource Include="Core\Planner\Prompts\system.md" LogicalName="Nexus.Planner.system.md" />
+    <EmbeddedResource Include="Core\Recipes\Prompts\matcher.md" LogicalName="Nexus.Recipes.matcher.md" />
   </ItemGroup>
 
   <!-- Built-in skills (Core/Skills); the key is the frontmatter name, so the resource name only needs the prefix -->
@@ -52,6 +53,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.8.0" />
     <PackageReference Include="Avalonia" Version="12.1.2" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />

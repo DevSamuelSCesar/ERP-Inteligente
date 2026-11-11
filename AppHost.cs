@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using erp_inteligente.Core.Audit;
@@ -42,16 +43,40 @@ public sealed class AppHost : IDisposable
         RecipeStore = new RecipeStore(database, Policy, AuditLog, time, skills);
         Engine = new PlanEngine(database, Policy, AuditLog, time, MemoryStore, RecipeStore);
         LlmSettings = new LlmSettings(secrets, database.Path);
-        var deepSeek = llm is null ? new DeepSeekProvider(DeepSeekProvider.CreateDefaultHandler(), LlmSettings.ReadKey) : null;
-        Llm = llm ?? deepSeek!;
-        LlmSettingsService = new LlmSettingsService(LlmSettings, Policy, AuditLog,
-            ct => deepSeek?.TestConnectionAsync(ct) ?? Task.CompletedTask);
+        // Feature 8: one adapter per provider behind a router; each request names its provider (model per role).
+        var settings = LlmSettings;
+        var handler = ChatCompletionsProvider.CreateDefaultHandler();
+        DeepSeekProvider? deepSeek = null;
+        ClaudeProvider? claude = null;
+        OpenAiProvider? openAi = null;
+        LocalProvider? local = null;
+        if (llm is null)
+        {
+            deepSeek = new DeepSeekProvider(handler, () => settings.ReadKey(LlmProviderKind.DeepSeek));
+            claude = new ClaudeProvider(handler, () => settings.ReadKey(LlmProviderKind.Claude));
+            openAi = new OpenAiProvider(handler, () => settings.ReadKey(LlmProviderKind.OpenAI));
+            local = new LocalProvider(handler, () => settings.LocalPort);
+        }
+        Llm = llm ?? new LlmRouter(new Dictionary<LlmProviderKind, ILlmProvider>
+        {
+            [LlmProviderKind.DeepSeek] = deepSeek!,
+            [LlmProviderKind.Claude] = claude!,
+            [LlmProviderKind.OpenAI] = openAi!,
+            [LlmProviderKind.Local] = local!,
+        });
+        LlmSettingsService = new LlmSettingsService(LlmSettings, Policy, AuditLog, (provider, ct) => provider switch
+        {
+            LlmProviderKind.DeepSeek => deepSeek?.TestConnectionAsync(ct) ?? Task.CompletedTask,
+            LlmProviderKind.Claude => claude?.TestConnectionAsync(ct) ?? Task.CompletedTask,
+            LlmProviderKind.OpenAI => openAi?.TestConnectionAsync(ct) ?? Task.CompletedTask,
+            _ => local?.TestConnectionAsync(LlmSettings.LocalModel, ct) ?? Task.CompletedTask,
+        });
         SyncKnowledge(database);
         MemoryRetriever = new MemoryRetriever(database, Policy);
         KnowledgeRetriever = new KnowledgeRetriever(database);
         Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: skills,
             memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever,
-            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog));
+            recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings));
         SkillStore = new SkillStore(database, Policy, AuditLog, time);
         AuditStatus = VerifyAudit();
     }

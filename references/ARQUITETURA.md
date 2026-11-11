@@ -323,6 +323,12 @@ operacoes: [create_inbound_order, receive_goods, cancel_inbound_order]
   - **Raciocínio:** no modo de raciocínio da DeepSeek, o `reasoning_content` de cada resposta é devolvido nas chamadas seguintes, como a API exige quando há ferramentas.
   - **Modelos:** `deepseek-v4-pro` (padrão) e `deepseek-flash`, escolhidos em Configurações.
 - **Modelo por papel:** um modelo barato para identificar receitas e extrair parâmetros, e um modelo forte para planejar e tratar exceções. Ambos são configuráveis.
+- **Estado (feature 8):** os três provedores e o modelo local estão implementados (`Core/Llm`).
+  - **Claude:** `ClaudeProvider` usa o SDK oficial `Anthropic` (NuGet), sem *streaming*. A chave sai do cofre a cada chamada e só existe no cliente daquela chamada; o transporte não segue redirecionamentos. Os blocos da resposta, incluindo o *thinking* assinado, voltam inalterados no laço de ferramentas, e resultados de ferramenta seguidos vão numa só mensagem. Não envia temperatura nem configuração de *thinking*: os modelos atuais recusam esses parâmetros, e o padrão é *thinking* adaptativo. Erros viram `LlmException` genérica, sem a chave.
+  - **OpenAI:** `OpenAiProvider`, com o mesmo cliente de *chat completions* da DeepSeek (`ChatCompletionsProvider`), endereço fixo e `max_completion_tokens`.
+  - **Modelo local:** `LocalProvider` fala só com `http://127.0.0.1:porta/v1/chat/completions`, sem chave, e só pode servir ao Matcher.
+  - **Roteamento:** `LlmRouter` envia cada pedido ao adaptador de `LlmRequest.Provider`. O Planner usa a escolha do papel `Planner`, e o Recipe Matcher a do papel `Matcher`.
+  - **Configuração:** em Configurações, o administrador (`user.manage`) guarda uma chave por provedor (`llm.deepseek.key`, `llm.claude.key`, `llm.openai.key` no cofre do SO), escolhe provedor e modelo de cada papel e a porta do modelo local. Tudo é auditado sem o valor da chave. O padrão é DeepSeek nos dois papéis.
 
 | Papel | Modelo padrão | Alternativas suportadas |
 |-------|---------------|-------------------------|
@@ -347,6 +353,7 @@ Experimento para reduzir custo e dependência de rede na etapa mais frequente: t
 | Modelo base | Modelo aberto pequeno (classe 1–3 bilhões de parâmetros, ex.: Qwen2.5-1.5B-Instruct) com LoRA, rodando localmente |
 | Métricas | *Exact match* do JSON, F1 por campo de parâmetro, taxa de JSON válido e taxa de acerto em "nenhuma receita" |
 | Comparação | Mesmo conjunto de teste com Claude Haiku 5.5 em *few-shot*; o modelo ajustado só substitui o Haiku se empatar ou superar no *exact match* |
+| Implementação (feature 8) | `tools/finetune`: `generate_dataset.py` (500 exemplos determinísticos, com o prompt `Core/Recipes/Prompts/matcher.md` que o app embute), `evaluate.py` (métricas e regra de adoção), `predict_claude.py` (linha de base), `train_lora.py` e `predict_local.py`. Adotado, o modelo é escolhido como "Modelo local" do papel Matcher em Configurações |
 
 ---
 
