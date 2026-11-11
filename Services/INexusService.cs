@@ -27,6 +27,7 @@ public sealed record NexusMemoryNote(string Content, bool Reinforced);
 /// <see cref="Draft"/>) and suggested next steps. Proposals are only written after the requester confirms one.
 /// </summary>
 /// <param name="IsEscalated">The Planner hit a limit (attempts, rounds or tokens): the task needs the operator.</param>
+/// <param name="Warnings">Data read for the request had text that looked like an instruction to the assistant (feature 6).</param>
 public sealed record NexusReply(
     string Text,
     PlanDraft? Draft = null,
@@ -36,7 +37,8 @@ public sealed record NexusReply(
     IReadOnlyList<NexusProposal>? Proposals = null,
     IReadOnlyList<NexusOption>? Options = null,
     NexusSkillProposal? Skill = null,
-    IReadOnlyList<NexusMemoryNote>? Memories = null);
+    IReadOnlyList<NexusMemoryNote>? Memories = null,
+    IReadOnlyList<string>? Warnings = null);
 
 /// <summary>Turns a natural-language request into a reply or a plan (the Planner, seen from the UI).</summary>
 public interface INexusService

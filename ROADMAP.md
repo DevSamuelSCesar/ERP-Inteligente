@@ -50,9 +50,13 @@ Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; 
 
 ## Segurança e economia
 
-### 6. Defesas de prompt injection e suíte de ataques
+### 6. Defesas de prompt injection e suíte de ataques ✅
 Delimitação de conteúdo externo no prompt, relato de instruções suspeitas, filtro de logs sensíveis e a suíte automatizada de prompt injection e SQL injection com métricas.
 *Entra antes das receitas para que o que for promovido já nasça validado contra ataques.*
+*Estado:* concluída em 2026-11-11.
+- `Core/Safety/InjectionDetector` examina resultados de ferramentas, memórias e trechos do RAG antes de irem ao LLM. Um bloco suspeito ainda é entregue, mas marcado com `alerta="instrucao_suspeita"`, auditado como `ai.injection` (fonte, linha e regra, nunca o texto) e avisado ao operador no chat. O pedido digitado também é examinado e só auditado. As regras-base são as mesmas do filtro de memórias.
+- `Core/Safety/SensitiveDataRedactor` mascara CPF, CNPJ, e-mail, telefone, chaves de API, tokens e pares `senha=` no alvo e nos detalhes da auditoria antes do hash.
+- Suíte de 25 ataques (`PromptInjectionSuiteTests`) com o modelo roteirizado no pior caso (obedece à injeção): **0% de sucesso e 100% de detecção**. Sem falso positivo nos 22 documentos de `knowledge/` nem nos produtos do seed (exceto `TST-INJ-01`).
 
 ### 7. Receitas
 Promoção de planos repetidos a receitas parametrizadas, Recipe Matcher com modelo barato, disparo direto pela UI sem LLM, invalidação por versão da DSL/skill e despromoção por falhas.

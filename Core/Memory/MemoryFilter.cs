@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using erp_inteligente.Core.Safety;
 using erp_inteligente.Core.Skills;
 
 namespace erp_inteligente.Core.Memory;
@@ -36,25 +37,6 @@ public static class MemoryFilter
         @"(?<![\w-])(?:\+?55[\s-]?)?\(?\d{2}\)?[\s-]?9?\d{4}[\s-]?\d{4}(?![\w-])" +
         @"|(?<![\w-])(?:9\d{4}-\d{4}|(?!(?:19|20)\d{2}-)\d{4}-\d{4})(?![\w-])");
 
-    // Raw text (markup that could break out of the prompt delimiters).
-    private static readonly Regex Markup = Rx(@"</|<\s*(?:dados|skill|system|assistant|instru)|```|<\|");
-
-    // Folded text (lower case, no accents).
-    private static readonly Regex[] Instruction =
-    [
-        Rx(@"\b(?:ignor\w*|desconsider\w*|esquec\w*|disregard|forget|override|sobrescrev\w*)\b[^.!?]{0,40}\b(?:instru\w*|regra\w*|anterior\w*|acima|previous|prior|above|rules?|instructions?|system|sistema|tudo|everything)"),
-        Rx(@"\bdesconsidere\b"),
-        Rx(@"\bvoce\s+deve\s+agora\b"),
-        Rx(@"\ba\s+partir\s+de\s+agora\b[^.!?]{0,20}\b(?:voce|tu|o\s+assistente|a\s+ia|nexus)\b"),
-        Rx(@"\bfrom\s+now\s+on\b[^.!?]{0,20}\byou\b"),
-        Rx(@"\byou\s+(?:must|should|are)\s+now\b|\bvoce\s+agora\s+(?:e|eh)\b"),
-        Rx(@"\bsystem\s+prompt\b|\bprompts?\b|\bjailbreak\w*|\bdan\s+mode\b"),
-        Rx(@"\baja\s+como\b|\bact\s+as\b|\bpretend\b|\bfinja\s+(?:ser|que)\b|\bse\s+comporte\s+como\b|\broleplay\b"),
-        Rx(@"\b(?:system|assistant|developer)\s*:"),
-        Rx(@"\baprov\w*\b[^.!?]{0,40}\b(?:automatic\w*|sem\s+(?:pedir\s+|exigir\s+)?(?:confirm\w*|aprova\w*|revis\w*|supervis\w*))"),
-        Rx(@"\b(?:automatic\w*|automaticamente)\b[^.!?]{0,30}\baprov\w*|\bauto[\s-]?approv\w*|\bapprov\w*\b[^.!?]{0,30}\bautomatically\b"),
-        Rx(@"\b(?:revel\w*|mostr\w*|exib\w*|imprim\w*|envi\w*|vaz\w*|divulg\w*|reveal|show|print|send|leak|expose|dump|display)\b[^.!?]{0,40}\b(?:senhas?|passwords?|passwd|tokens?|api[\s-]?keys?|segredos?|secrets?|credenciais|credentials|chave\s+(?:d[eao]s?\s+)?(?:api|secreta|criptografica|mestra|privada|cofre)|private\s+key|secret\s+key)\b"),
-    ];
 
     /// <summary>
     /// Normalizes <paramref name="content"/> (control, format and bidi characters removed, whitespace collapsed)
@@ -78,12 +60,11 @@ public static class MemoryFilter
                 return MemoryFilterResult.Refuse("A memória contém um e-mail. Dados pessoais não podem ser guardados.", "email");
             if (Phone.IsMatch(text))
                 return MemoryFilterResult.Refuse("A memória contém um telefone. Dados pessoais não podem ser guardados.", "phone");
-            if (Markup.IsMatch(text))
-                return Instructionlike();
-
-            var folded = TextFold.Fold(text);
-            foreach (var rule in Instruction)
-                if (rule.IsMatch(folded)) return Instructionlike();
+            // Markup and the core instruction rules live in the injection detector (shared with the Planner).
+            if (InjectionDetector.ScanCore(text) is { } match)
+                return match.Code == "timeout"
+                    ? MemoryFilterResult.Refuse("Não foi possível validar o conteúdo da memória.", "timeout")
+                    : Instructionlike();
         }
         catch (RegexMatchTimeoutException)
         {

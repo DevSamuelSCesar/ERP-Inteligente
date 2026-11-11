@@ -458,7 +458,7 @@ No policy engine (`Core/Policy`):
 
 Camadas, da mais externa para a mais interna:
 
-1. **Conteúdo é dado, não instrução:** descrições de produtos, documentos do RAG, memórias e resultados de ferramentas entram no prompt dentro de blocos delimitados e marcados como dados de referência. O prompt de sistema diz explicitamente que instruções dentro desses blocos devem ser ignoradas e relatadas.
+1. **Conteúdo é dado, não instrução:** descrições de produtos, documentos do RAG, memórias e resultados de ferramentas entram no prompt dentro de blocos delimitados e marcados como dados de referência. O prompt de sistema diz explicitamente que instruções dentro desses blocos devem ser ignoradas e relatadas. Desde a feature 6, um detector determinístico (`Core/Safety/InjectionDetector`) examina esses textos antes do envio. Um bloco suspeito ganha `alerta="instrucao_suspeita"`, é auditado como `ai.injection` (sem o texto) e gera um aviso ao operador no chat. O pedido digitado também é examinado e auditado. A auditoria passa por um filtro de dados sensíveis antes do hash (`SensitiveDataRedactor`). Ver [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), seção 3.4.
 2. **Skills não ampliam direitos:** uma skill é instrução aprovada pelo supervisor, mas as operações e ferramentas oferecidas vêm só do direito efetivo (IA ∩ usuário), e o prompt manda as regras do sistema prevalecerem sobre a skill. Só uma pessoa com `skill.manage` grava uma skill, depois de ver o texto inteiro.
 3. **Sem SQL e sem escrita direta:** a única forma de alterar dados é `propose_plan`, com operações de um catálogo fechado, executadas só depois da confirmação de quem pediu.
 4. **Validação determinística:** schema, regras de negócio e permissões (interseção IA ∩ usuário) são checados pelo código.
@@ -482,4 +482,4 @@ Camadas, da mais externa para a mais interna:
 
 - `db/tests/test_db.py`: imutabilidade, escalonamento de privilégio, interseção IA ∩ usuário, *authorizer* da IA, SQL injection, otimização, migrações 2 → 3 → 4 e reservas (`MigrationTo3Tests`, `MigrationTo4Tests`, `ReservationTests`).
 - Testes do app em `tests/Nexus.Tests`: catálogo (`CatalogOperationTests`, `OrderOperationTests`), pesquisa (`SearchToolsTests`), propostas da IA (`ProposePlanTests`) e migrações (`MigrationTests`).
-- Suíte de ataques de prompt injection e de SQL injection descrita em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), com métricas.
+- Suíte de ataques de prompt injection e de SQL injection descrita em [`SEGURANCA_DADOS.md`](SEGURANCA_DADOS.md), com métricas: `PromptInjectionSuiteTests` (25 casos, modelo roteirizado obedecendo à injeção; 0% de sucesso e 100% de detecção).

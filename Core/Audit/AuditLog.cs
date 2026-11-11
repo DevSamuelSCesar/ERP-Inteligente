@@ -1,5 +1,6 @@
 using System;
 using erp_inteligente.Core.Data;
+using erp_inteligente.Core.Safety;
 using Microsoft.Data.Sqlite;
 
 namespace erp_inteligente.Core.Audit;
@@ -32,6 +33,7 @@ public sealed class AuditLog(NexusDatabase database, TimeProvider time) : IAudit
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(entry);
         entry.EnsureValid();
+        entry = Redacted(entry);
 
         long lastId = 0;
         string prevHash = AuditHasher.Genesis;
@@ -76,5 +78,19 @@ public sealed class AuditLog(NexusDatabase database, TimeProvider time) : IAudit
         insert.ExecuteNonQuery();
 
         return id;
+    }
+
+    /// <summary>
+    /// The filter of sensitive logs (feature 6): target and details are masked before the hash is computed, so what is
+    /// stored and chained never holds a CPF, an e-mail, a phone or a key. The entry is returned as is when nothing changes.
+    /// </summary>
+    internal static AuditEntry Redacted(AuditEntry entry)
+    {
+        var target = entry.Target is null ? null : SensitiveDataRedactor.Redact(entry.Target);
+        if (target is not null && target.Length > AuditEntry.MaxTargetLength) target = target[..AuditEntry.MaxTargetLength];
+        var details = SensitiveDataRedactor.RedactJson(entry.DetailsJson);
+        if (details is not null && details.Length > AuditEntry.MaxDetailsJsonLength) details = """{"omitted":"details"}""";
+        if (target == entry.Target && details == entry.DetailsJson) return entry;
+        return new AuditEntry(entry.ActorType, entry.ActorId, entry.OnBehalfOf, entry.Action, target, entry.Outcome, details);
     }
 }

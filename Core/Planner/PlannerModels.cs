@@ -7,7 +7,21 @@ using erp_inteligente.Models;
 namespace erp_inteligente.Core.Planner;
 
 /// <summary>Outcome of one request handled by the <see cref="Planner"/>.</summary>
-public abstract record PlannerResult;
+public abstract record PlannerResult
+{
+    /// <summary>
+    /// External content read during the request that looked like an instruction to the model (feature 6). It was
+    /// delivered as marked reference data, audited as <c>ai.injection</c>, and the operator is warned.
+    /// </summary>
+    public IReadOnlyList<SuspiciousContent> Suspicious { get; init; } = [];
+}
+
+/// <summary>
+/// Where an instruction-like text was found: <see cref="Source"/> is the data block ("tool:get_product", "memorias",
+/// "knowledge:path#heading"), <see cref="Reference"/> the row it came from (a SKU, a code) when known, and
+/// <see cref="Code"/> the detector rule (see <see cref="erp_inteligente.Core.Safety.InjectionDetector"/>).
+/// </summary>
+public sealed record SuspiciousContent(string Source, string? Reference, string Code);
 
 /// <summary>A suggested next step the operator can click; choosing it sends <see cref="Request"/> as if typed.</summary>
 public sealed record PlannerOption(string Label, string Request);

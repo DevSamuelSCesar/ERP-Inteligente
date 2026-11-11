@@ -86,6 +86,7 @@ public sealed partial class Planner(
         public List<SkillContent> LoadedSkills { get; } = [];
         public SkillProposal? Skill { get; set; }
         public List<RememberedMemory> Remembered { get; } = [];
+        public List<SuspiciousContent> Suspicious { get; } = [];
         public bool HasResult => Proposals.Count > 0 || Skill is not null;
     }
 
@@ -140,16 +141,21 @@ public sealed partial class Planner(
             messages.Add(LlmMessage.User(turn.Request));
             messages.Add(LlmMessage.Assistant(turn.Reply.Content, null, turn.Reply.ReasoningContent));
         }
-        var context = await Task.Run(() => BuildContext(user, aiUserId, request), ct);
+        var state = new RunState();
+        await Task.Run(() => ScanRequest(aiUserId, user, request), ct);
+        var context = await Task.Run(() => BuildContext(user, aiUserId, state, request), ct);
         messages.Add(LlmMessage.User(context + request));
 
-        var state = new RunState();
         var tokens = 0;
         status.Report("Planejando");
 
+        // Every result carries what the injection scan found, whatever the way out.
+        (PlannerResult, PlannerTurn?) Flag((PlannerResult Result, PlannerTurn? Turn) outcome) =>
+            (outcome.Result with { Suspicious = state.Suspicious.ToArray() }, outcome.Turn);
+
         // With valid proposals in hand a limit never throws them away: the operator gets what was prepared.
         (PlannerResult, PlannerTurn?) Limit(PlannerEscalated escalated) =>
-            state.HasResult ? Conclude(request, state, null, null) : (escalated, null);
+            Flag(state.HasResult ? Conclude(request, state, null, null) : (escalated, null));
 
         for (var round = 1; round <= _options.MaxRounds; round++)
         {
@@ -164,8 +170,8 @@ public sealed partial class Planner(
             }
             catch (LlmException ex)
             {
-                if (state.HasResult) return Conclude(request, state, null, null);
-                return (new PlannerFailed(MessageFor(ex.Kind)), null);
+                if (state.HasResult) return Flag(Conclude(request, state, null, null));
+                return Flag((new PlannerFailed(MessageFor(ex.Kind)), null));
             }
             tokens += Math.Max(0, response.Usage.PromptTokens) + Math.Max(0, response.Usage.CompletionTokens);
 
@@ -173,14 +179,14 @@ public sealed partial class Planner(
             {
                 var text = CleanText(response.Content);
                 if (state.HasResult)
-                    return Conclude(request, state, text.Length > 0 ? text : null, response.ReasoningContent);
+                    return Flag(Conclude(request, state, text.Length > 0 ? text : null, response.ReasoningContent));
                 if (text.Length == 0 && state.Options.Count > 0)
                     text = "Como prefere seguir?";
                 if (text.Length == 0)
-                    return response.FinishReason == LlmFinishReason.Length
+                    return Flag(response.FinishReason == LlmFinishReason.Length
                         ? (new PlannerEscalated("A resposta ficou longa demais para ser concluída. Faça um pedido mais específico."), null)
-                        : (new PlannerFailed("O Nexus não devolveu uma resposta válida. Tente de novo."), null);
-                return (new PlannerAnswer(text, state.Options.ToArray()) { Remembered = state.Remembered.ToArray() }, Remember(request, text, response.ReasoningContent));
+                        : (new PlannerFailed("O Nexus não devolveu uma resposta válida. Tente de novo."), null));
+                return Flag((new PlannerAnswer(text, state.Options.ToArray()) { Remembered = state.Remembered.ToArray() }, Remember(request, text, response.ReasoningContent)));
             }
 
             messages.Add(LlmMessage.Assistant(response));
@@ -197,11 +203,16 @@ public sealed partial class Planner(
                 var outcome = await Task.Run(() => RunTool(user, aiUserId, rights, canPropose, canDraftSkill, canRemember, state, call, status), ct);
                 if (call.Name == ProposePlan && !outcome.Allowed && outcome.Code != "too_many_proposals") state.Invalid++;
                 if (call.Name == ProposeSkill && !outcome.Allowed && outcome.Code is not ("too_many_skill_proposals" or "not_allowed")) state.Invalid++;
-                messages.Add(LlmMessage.ToolResult(call.Id, outcome.Raw ? outcome.Json : Wrap("tool:" + SafeToolName(call.Name), outcome.Json)));
+                var source = "tool:" + SafeToolName(call.Name);
+                // Only data read from outside the model is scanned: the Planner's own messages and the model's echoed
+                // arguments (a plan error) are not external content, and an approved skill is an instruction by design.
+                var suspicious = outcome.Allowed && !outcome.Raw && call.Name is { } toolName && ScansResult(toolName)
+                    && (await Task.Run(() => ScanToolResult(aiUserId, user, state, source, outcome.Json), ct)).Count > 0;
+                messages.Add(LlmMessage.ToolResult(call.Id, outcome.Raw ? outcome.Json : Wrap(source, outcome.Json, suspicious)));
             }
 
             if (state.Proposals.Count >= _options.MaxProposals)
-                return await FinalTextAsync(user, request, state, messages, tokens, ct);
+                return Flag(await FinalTextAsync(user, request, state, messages, tokens, ct));
 
             if (state.Invalid >= _options.MaxInvalidPlans)
                 return Limit(new PlannerEscalated(
@@ -369,7 +380,7 @@ public sealed partial class Planner(
     /// The automatic context of a request: the best memories and procedure chunks, as reference data placed in front of the
     /// current user message (never in the system prompt or the history). Nothing here may stop the request.
     /// </summary>
-    private string BuildContext(UserSession user, long? aiUserId, string request)
+    private string BuildContext(UserSession user, long? aiUserId, RunState state, string request)
     {
         if (memoryRetriever is null && knowledge is null) return string.Empty;
         try
@@ -396,6 +407,10 @@ public sealed partial class Planner(
                 }
                 if (block.Length <= MaxContextMemoryChars)
                 {
+                    // Every memory is scanned (no short-circuit), so each suspicious one is audited.
+                    var flagged = kept.Select(m => ScanBlock(aiUserId, user, state, "memorias", "id:" + m.Id, m.Content).Count > 0).ToList();
+                    if (flagged.Contains(true))
+                        block = block.Replace("<dados fonte=\"memorias\">", $"<dados fonte=\"memorias\" {SuspiciousAttribute}>", StringComparison.Ordinal);
                     builder.Append(block).Append('\n');
                     usedMemories.AddRange(kept.Select(m => m.Id));
                 }
@@ -405,11 +420,13 @@ public sealed partial class Planner(
             {
                 var source = "knowledge:" + new string(chunk.SourcePath.Where(c => c is not ('"' or '<' or '>' or '\n' or '\r')).ToArray())
                     + "#" + new string(chunk.Heading.Where(c => c is not ('"' or '<' or '>' or '\n' or '\r')).ToArray());
-                var overhead = "<dados fonte=\"\">".Length + source.Length + "</dados>\n".Length;
+                var overhead = "<dados fonte=\"\" >".Length + SuspiciousAttribute.Length + source.Length + "</dados>\n".Length;
                 var room = Math.Min(MaxContextChunkChars, MaxContextChars - builder.Length - overhead);
                 if (room < MinContextChunkChars) break;
-                var content = PlannerTools.Shorten(chunk.Content.Trim(), room).Replace("<", "\\u003c", StringComparison.Ordinal).Replace(">", "\\u003e", StringComparison.Ordinal);
-                builder.Append(Wrap(source, content)).Append('\n');
+                var shortened = PlannerTools.Shorten(chunk.Content.Trim(), room);
+                var suspicious = ScanBlock(aiUserId, user, state, source, null, shortened).Count > 0;
+                var content = shortened.Replace("<", "\\u003c", StringComparison.Ordinal).Replace(">", "\\u003e", StringComparison.Ordinal);
+                builder.Append(Wrap(source, content, suspicious)).Append('\n');
                 if (!usedPaths.Contains(chunk.SourcePath, StringComparer.Ordinal)) usedPaths.Add(chunk.SourcePath);
             }
             if (builder.Length == 0) return string.Empty;
@@ -930,7 +947,12 @@ public sealed partial class Planner(
         _ => "O provedor de IA está indisponível no momento. Tente de novo em instantes.",
     };
 
-    private static string Wrap(string source, string json) => $"<dados fonte=\"{source}\">{json}</dados>";
+    private static string Wrap(string source, string json, bool suspicious = false) =>
+        suspicious ? $"<dados fonte=\"{source}\" {SuspiciousAttribute}>{json}</dados>" : $"<dados fonte=\"{source}\">{json}</dados>";
+
+    /// <summary>Tools whose result carries external data (database rows, procedures, memories).</summary>
+    private static bool ScansResult(string name) =>
+        PlannerTools.ReadToolNames.Contains(name) || name is PlannerTools.SearchKnowledge or PlannerTools.SearchMemories;
 
     /// <summary>Tool name for audit and for the data wrapper: only known names are echoed.</summary>
     private static string SafeToolName(string name) =>

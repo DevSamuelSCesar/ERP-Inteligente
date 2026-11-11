@@ -81,6 +81,9 @@ public sealed partial class NexusViewModel(UserSession user, INexusService nexus
             await RefreshProductNamesAsync();
             if (!string.IsNullOrWhiteSpace(reply.Text))
                 Say(new TextBodyViewModel(reply.Text, reply.IsError, reply.IsEscalated, _productNames));
+            // Before the proposals: the operator reads the warning before deciding to confirm (feature 6).
+            foreach (var warning in reply.Warnings ?? [])
+                Say(new TextBodyViewModel(warning, isWarning: true));
 
             var proposals = reply.Proposals is { Count: > 0 } list
                 ? list.Take(MaxAlternatives).ToList()
