@@ -6,6 +6,10 @@ attempts). Each example carries the expected JSON ({"intent", "recipe", "params"
 messages the app sends (the same system prompt file as the C# RecipeMatcher), so a fine-tuned model sees exactly the
 production input. Deterministic for a given seed. Standard library only.
 
+It also writes holdout.jsonl from holdout.json: 40 hand-written requests (other phrasings, SKUs outside the generator's
+list, numbers in words, near misses such as a move between two shelves or a receipt with a lot). The generated test set
+shares the templates of the training set, so it measures the templates; the holdout measures generalization.
+
     python tools/finetune/generate_dataset.py --out tools/finetune/data
 """
 
@@ -19,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 HERE = pathlib.Path(__file__).resolve().parent
 PROMPT_FILE = ROOT / "Core" / "Recipes" / "Prompts" / "matcher.md"
 RECIPES_FILE = HERE / "recipes.json"
+HOLDOUT_FILE = HERE / "holdout.json"
 
 SKUS = ["ABC-123", "ABC-124", "FER-010", "FER-011", "LIM-200", "LIM-201", "ALI-300", "ALI-301", "EMB-500"]
 DOCKS = ["DOCA-01", "DOCA-02"]
@@ -184,6 +189,19 @@ def build(seed=42, total=TOTAL, test_size=TEST_SIZE):
     return examples[test_size:], examples[:test_size]
 
 
+def holdout():
+    """The hand-written cases with the same chat messages as the generated ones."""
+    system = system_message(load_recipes())
+    rows = json.loads(HOLDOUT_FILE.read_text(encoding="utf-8"))
+    for row in rows:
+        row["messages"] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": row["input"]},
+            {"role": "assistant", "content": json.dumps(row["output"], ensure_ascii=False)},
+        ]
+    return rows
+
+
 def write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
@@ -200,7 +218,9 @@ def main():
     out = pathlib.Path(args.out)
     write_jsonl(out / "train.jsonl", train)
     write_jsonl(out / "test.jsonl", test)
-    print(f"train: {len(train)}, test: {len(test)} -> {out}")
+    hand = holdout()
+    write_jsonl(out / "holdout.jsonl", hand)
+    print(f"train: {len(train)}, test: {len(test)}, holdout: {len(hand)} -> {out}")
 
 
 if __name__ == "__main__":

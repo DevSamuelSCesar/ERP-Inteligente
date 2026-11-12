@@ -83,6 +83,13 @@ public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditL
             RecordUsage(user, choice, response.Usage, "no_match");
             return null;
         }
+        if (!RecipeGrounding.IsGrounded(request, parameters, out _))
+        {
+            // A value the request does not contain was invented by the model: the Planner asks for it instead.
+            Audit(aiUserId, user, Target(recipe), AuditOutcome.Denied, "ungrounded_parameters");
+            RecordUsage(user, choice, response.Usage, "no_match");
+            return null;
+        }
         Audit(aiUserId, user, Target(recipe), AuditOutcome.Allowed, "matched");
         return new RecipeMatch(recipe, parameters, instance.PlanJson!, choice, response.Usage);
     }

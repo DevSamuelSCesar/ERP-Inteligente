@@ -38,26 +38,30 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--shots", type=int, default=8)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--split", choices=["test", "holdout"], default="test")
     args = parser.parse_args()
 
     data = pathlib.Path(args.data)
     train = [json.loads(line) for line in (data / "train.jsonl").read_text(encoding="utf-8").splitlines() if line]
-    test = [json.loads(line) for line in (data / "test.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    test = [json.loads(line) for line in (data / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines() if line]
     examples = few_shot(train, args.shots, args.seed)
 
     client = anthropic.Anthropic()
+    stops = {}
     with pathlib.Path(args.out).open("w", encoding="utf-8", newline="\n") as out:
         for row in test:
             system = row["messages"][0]["content"]
             response = client.messages.create(
                 model=MODEL,
-                max_tokens=1024,
+                # Haiku 5.5 thinks adaptively by default: room for the thinking and the short JSON answer.
+                max_tokens=4096,
                 system=system,
                 messages=examples + [{"role": "user", "content": row["input"]}],
             )
+            stops[response.stop_reason] = stops.get(response.stop_reason, 0) + 1
             text = "".join(block.text for block in response.content if block.type == "text")
             out.write(json.dumps({"id": row["id"], "prediction": text}, ensure_ascii=False) + "\n")
-    print(f"{len(test)} predictions -> {args.out}")
+    print(f"{len(test)} predictions -> {args.out}; stop reasons: {stops}")
 
 
 if __name__ == "__main__":

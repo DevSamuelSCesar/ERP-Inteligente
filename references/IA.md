@@ -114,7 +114,7 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 | Métricas | *Exact match* do JSON; F1 por campo; % de JSON válido; acerto em "nenhuma receita" |
 | Linha de base | Claude Haiku 5.5 com *few-shot* no mesmo conjunto de teste |
 | Critério de adoção | Substitui o Haiku se empatar ou superar no *exact match* e tiver ≥ 99% de JSON válido |
-| Ferramentas (feature 8) | `tools/finetune`, ver o `README.md` de lá. O gerador e a avaliação estão testados (`tools/tests/test_finetune.py`). **Resultados ainda não medidos:** o treino precisa de GPU e a linha de base precisa da chave da Anthropic |
+| Ferramentas (feature 8) | `tools/finetune`, ver o `README.md` de lá. O gerador, o conjunto escrito à mão e a avaliação estão testados (`tools/tests/test_finetune.py`) |
 
 Exemplo de par de treino:
 
@@ -124,11 +124,37 @@ Exemplo de par de treino:
             "params": {"sku": "ABC-124", "qty": 20, "dock": "DOCA-02", "target": "A-01-02"}}}
 ```
 
+**Resultados (2026-11-12):** Qwen2.5-1.5B-Instruct com LoRA (r = 16, 3 épocas, perda só na resposta), treinado numa GTX 1660 de 6 GB em 3 h 03 min, servido em `127.0.0.1` por `serve_local.py`. O conjunto de teste gerado sai dos mesmos modelos de frase do treino; por isso o grupo escreveu à mão um segundo conjunto (`tools/finetune/holdout.json`, 40 pedidos: outras frases, SKUs fora da lista do gerador, números por extenso e quase acertos, como mover entre duas prateleiras ou receber com lote).
+
+| Conjunto | JSON válido | *Exact match* | F1 por campo | "Nenhuma receita" |
+|----------|------------:|--------------:|-------------:|------------------:|
+| Teste gerado (100) | 100% | 100% | 1,000 | 100% |
+| Escrito à mão (40), resposta do modelo | 100% | 80,0% | 0,991 | 30% |
+| Escrito à mão (40), depois da checagem do app | 100% | 92,5% | 0,986 | 80% |
+
+- Nos pedidos dentro do escopo, o modelo acerta 29 de 30 casos, inclusive frases novas e números por extenso.
+- O ponto fraco é o pedido incompleto: o modelo completa o que falta com um valor plausível (um destino, uma quantidade "1", uma doca). Por isso o app ganhou a checagem `RecipeGrounding` depois do Matcher, que vale para qualquer provedor. Cada valor precisa estar no pedido (sem diferenciar maiúsculas e acentos, "doca 1" = `DOCA-01`, número por extenso aceito), e cada trecho do pedido sustenta um valor só. Se a checagem falha, não há receita e o Planner pergunta. A mesma regra, em Python, está em `evaluate.py --guard`; os vetores de teste (`grounding_cases.json`) são os mesmos nas duas linguagens.
+- Ainda passam pela checagem 2 de 40 casos:
+  - "baixa 3 LIM-200 no A-01-02 por avaria", sem motivo: o modelo usou "Avaria" como motivo;
+  - um recebimento com lote, que a receita sem lote ignora.
+  - Nos dois casos, o resultado continua sendo uma proposta que quem pediu confirma.
+- Latência: cerca de 6 s por pedido nessa GPU (transformers em fp16, sem quantização). Uma chamada ao Haiku costuma levar 1 a 2 s.
+- **Pendente (depende da chave da Anthropic):** a linha de base com o Haiku e a decisão de adoção.
+
+```bash
+ANTHROPIC_API_KEY=... python tools/finetune/predict_claude.py --data tools/finetune/data --out tools/finetune/data/pred_haiku.jsonl
+ANTHROPIC_API_KEY=... python tools/finetune/predict_claude.py --data tools/finetune/data --split holdout --out tools/finetune/data/pred_haiku_holdout.jsonl
+python tools/finetune/evaluate.py --gold tools/finetune/data/holdout.jsonl --pred tools/finetune/data/pred_local_holdout.jsonl --baseline tools/finetune/data/pred_haiku_holdout.jsonl --guard
+```
+
+Recomendação do grupo enquanto isso: manter o Matcher num provedor (Haiku ou `deepseek-flash`). O modelo local é a opção para quem não quer enviar nada para fora. Ele vale a pena se, no conjunto escrito à mão e com a checagem, empatar com o Haiku.
+
 ## 5. Onde a IA pode errar e como medimos
 
 | Risco | Exemplo | Defesa | Métrica (conjunto de avaliação) |
 |-------|---------|--------|---------------------------------|
 | Alucinação de dados | Inventar um endereço ou SKU que não existe | O validador rejeita referências inexistentes | % de planos válidos na 1ª tentativa; nº médio de tentativas (50 pedidos com gabarito) |
+| Valor inventado pelo Matcher | "guarda 15 LIM-201 da doca 2" vira uma receita com um destino que ninguém pediu | `RecipeGrounding`: cada valor precisa estar no pedido, senão não há receita e o Planner pergunta | Acerto em "nenhuma receita" nos 40 pedidos escritos à mão (seção 4) |
 | Alucinação de procedimento | Afirmar uma regra que não está nos documentos | RAG com citação obrigatória da origem | % de respostas corretas e com fonte certa (40 perguntas sobre `knowledge/`); recall@4 do RAG |
 | Fora do escopo | "Calcule a folha de pagamento", "qual a previsão do tempo?" | Prompt de sistema restrito ao armazém; sem ferramentas para outros assuntos | % de recusas corretas (30 pedidos fora do escopo) |
 | Recusa ou pergunta desnecessária | "Guarde 10 cx do ABC-123 em Q-01-01" com a zona Q inexistente: o certo é propor a zona, os endereços e a movimentação | Prompt proativo: padrões, suposições e plano que cria o que falta; pergunta só com `offer_options` | % de pedidos com plano válido sem pergunta (casos proativos); % de recusas corretas (sem direito ou fora do escopo) |

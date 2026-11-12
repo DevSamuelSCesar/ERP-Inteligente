@@ -29,11 +29,12 @@ def main():
     parser.add_argument("--data", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--split", choices=["test", "holdout"], default="test")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("the port must be between 1024 and 65535")
 
-    test = [json.loads(line) for line in (pathlib.Path(args.data) / "test.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    test = [json.loads(line) for line in (pathlib.Path(args.data) / f"{args.split}.jsonl").read_text(encoding="utf-8").splitlines() if line]
     with pathlib.Path(args.out).open("w", encoding="utf-8", newline="\n") as out:
         for row in test:
             text = complete(args.port, row["messages"][:2])

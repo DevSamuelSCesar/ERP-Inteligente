@@ -73,6 +73,42 @@ class DatasetTests(unittest.TestCase):
                 self.assertNotIn(generate_dataset.PROTECTED, row["input"])
 
 
+class HoldoutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rows = generate_dataset.holdout()
+        cls.recipes = {r["nome"]: r for r in generate_dataset.load_recipes()}
+
+    def test_has_40_cases_with_unique_ids_and_a_quarter_out_of_scope(self):
+        self.assertEqual(len(self.rows), 40)
+        self.assertEqual(len({r["id"] for r in self.rows}), 40)
+        self.assertEqual(sum(1 for r in self.rows if r["output"] == {"intent": "none"}), 10)
+
+    def test_answers_fill_exactly_the_parameters_of_their_recipe_with_values_from_the_request(self):
+        for row in self.rows:
+            output = row["output"]
+            if output == {"intent": "none"}:
+                continue
+            with self.subTest(row=row["id"]):
+                recipe = self.recipes[output["recipe"]]
+                self.assertEqual(set(output["params"]), set(recipe["parametros"]))
+                self.assertEqual(output["intent"], recipe["intent"])
+                self.assertIn(output["params"]["sku"].lower(), row["input"].lower())
+                if "reason" in output["params"]:
+                    self.assertIn(output["params"]["reason"], row["input"])
+                    self.assertLess(output["params"]["qty"], 0)
+
+    def test_no_case_is_in_the_generated_sets(self):
+        train, test = generate_dataset.build(seed=42)
+        generated = {r["input"].lower() for r in train + test}
+        self.assertFalse([r["id"] for r in self.rows if r["input"].lower() in generated])
+
+    def test_messages_match_the_generated_ones(self):
+        system = generate_dataset.build(seed=42)[1][0]["messages"][0]
+        self.assertEqual(self.rows[0]["messages"][0], system)
+        self.assertEqual(self.rows[0]["messages"][1]["content"], self.rows[0]["input"])
+
+
 class EvaluateTests(unittest.TestCase):
     GOLD = [
         {"id": "a", "output": {"intent": "putaway", "recipe": "armazenar_da_doca",
@@ -108,6 +144,33 @@ class EvaluateTests(unittest.TestCase):
 
     def test_missing_predictions_count_as_invalid(self):
         self.assertEqual(evaluate.metrics(self.GOLD, {})["valid_json"], 0.0)
+
+    def test_grounding_shares_the_vectors_of_the_app(self):
+        path = pathlib.Path(evaluate.__file__).resolve().parent / "grounding_cases.json"
+        cases = json.loads(path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(cases), 10)
+        for case in cases:
+            with self.subTest(request=case["request"]):
+                ok, name = evaluate.grounded(case["request"], case["values"])
+                self.assertEqual(ok, case["ungrounded"] is None)
+                self.assertEqual(name, case["ungrounded"])
+        self.assertEqual(evaluate.tokens("DOCA-01 no A-02-01, Recepção"), ["doca", "1", "no", "a", "2", "1", "recepcao"])
+
+    def test_guard_turns_invented_or_incomplete_answers_into_no_recipe(self):
+        gold = [
+            {"id": "a", "input": "guarda 15 LIM-201 da doca 2", "output": {"intent": "none"}},
+            {"id": "b", "input": "recebe 50 ABC-123", "output": {"intent": "none"}},
+            {"id": "c", "input": "receba 12 FER-010 na doca 2", "output": self.GOLD[2]["output"]},
+        ]
+        predictions = {
+            "a": '{"recipe":"armazenar_da_doca","params":{"sku":"LIM-201","qty":15,"dock":"DOCA-02","target":"B-01-01"}}',
+            "b": '{"recipe":"receber_na_doca","params":{"sku":"ABC-123","qty":50}}',
+            "c": '{"recipe":"receber_na_doca","params":{"sku":"FER-010","qty":12,"location":"DOCA-02"}}',
+        }
+        self.assertEqual(evaluate.metrics(gold, predictions)["exact_match"], 1 / 3)
+        guarded = evaluate.metrics(gold, predictions, with_guard=True)
+        self.assertEqual(guarded["exact_match"], 1.0)
+        self.assertEqual(guarded["none_accuracy"], 1.0)
 
     def test_adoption_rule(self):
         base = {"exact_match": 0.90, "valid_json": 1.0}

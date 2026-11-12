@@ -94,7 +94,8 @@ public sealed class RecipeMatcherTests : IDisposable
     [InlineData("{\"receita\":\"armazenar_da_doca\",\"parametros\":{\"sku\":\"ABC-123\",\"qty\":\"muitas\",\"dock\":\"DOCA-01\",\"target\":\"A-02-01\"}}")]
     [InlineData("{\"receita\":\"armazenar_da_doca\",\"parametros\":{\"sku\":\"ABC-123\",\"qty\":40,\"dock\":\"DOCA-01\"}}")] // missing value
     [InlineData("Claro! Vou usar a receita.")]
-    [InlineData("{\"receita\":\"armazenar_da_doca\",\"parametros\":{\"sku\":\"ABC-123\",\"qty\":99999,\"dock\":\"DOCA-01\",\"target\":\"A-02-01\"}}")] // fails the simulation
+    [InlineData("{\"receita\":\"armazenar_da_doca\",\"parametros\":{\"sku\":\"ABC-123\",\"qty\":40,\"dock\":\"DOCA-01\",\"target\":\"B-01-01\"}}")] // invented destination
+    [InlineData("{\"receita\":\"armazenar_da_doca\",\"parametros\":{\"sku\":\"ABC-123\",\"qty\":4,\"dock\":\"DOCA-01\",\"target\":\"A-02-01\"}}")] // quantity not in the request
     public async Task A_doubtful_match_never_becomes_a_recipe_proposal(string reply)
     {
         _llm.Enqueue(Text(reply)).Enqueue(Text("ok"));
@@ -102,6 +103,25 @@ public sealed class RecipeMatcherTests : IDisposable
 
         Assert.IsType<PlannerAnswer>(result);
         Assert.Equal(2, _llm.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_match_that_fails_the_simulation_is_not_proposed()
+    {
+        const string request = "guarde as 99999 caixas do ABC-123 da DOCA-01 no A-02-01";
+        _llm.Enqueue(Text(Match(new { sku = "ABC-123", qty = 99999, dock = "DOCA-01", target = "A-02-01" }))).Enqueue(Text("ok"));
+        var (result, _) = await Run(request);
+
+        Assert.IsType<PlannerAnswer>(result);
+        Assert.Equal(2, _llm.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_value_the_request_does_not_contain_is_audited_as_ungrounded()
+    {
+        _llm.Enqueue(Text(Match(new { sku = "ABC-123", qty = 40, dock = "DOCA-01", target = "B-01-01" }))).Enqueue(Text("ok"));
+        await Run(Request);
+        Assert.Equal(1, Count("SELECT COUNT(*) FROM audit_log WHERE action = 'ai.recipe_match' AND outcome = 'denied' AND details_json LIKE '%ungrounded_parameters%'"));
     }
 
     [Theory]
