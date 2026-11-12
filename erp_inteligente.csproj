@@ -40,12 +40,12 @@
     <EmbeddedResource Include="knowledge\*.md" Exclude="knowledge\README.md" LogicalName="Nexus.Knowledge.%(Filename)%(Extension)" />
   </ItemGroup>
 
-  <!-- The test project lives under tests/ and must not be compiled into the app. -->
+  <!-- The test project (tests/) and the evaluation runner (tools/) must not be compiled into the app. -->
   <ItemGroup>
-    <Compile Remove="tests\**" />
-    <AvaloniaXaml Remove="tests\**" />
-    <None Remove="tests\**" />
-    <EmbeddedResource Remove="tests\**" />
+    <Compile Remove="tests\**;tools\**" />
+    <AvaloniaXaml Remove="tests\**;tools\**" />
+    <None Remove="tests\**;tools\**" />
+    <EmbeddedResource Remove="tests\**;tools\**" />
   </ItemGroup>
 
   <ItemGroup>

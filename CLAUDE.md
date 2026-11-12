@@ -63,6 +63,7 @@ python3 tools/finetune/evaluate.py --gold tools/finetune/data/test.jsonl --pred 
 python3 tools/finetune/train_lora.py --data tools/finetune/data --out DIR/nexus-matcher   # GPU (venv com requirements-train.txt)
 python3 tools/finetune/serve_local.py --matcher DIR/nexus-matcher/merged --port 8080      # Matcher e embeddings em 127.0.0.1
 dotnet build                                                       # app (sem avisos)
+dotnet run --project tools/Nexus.Eval                             # conjuntos de avaliação: RAG sem chave; --suites all com a chave em variável de ambiente
 dotnet run                                                         # abre o app (banco em ~/.local/share/Nexus/nexus.db)
 dotnet run -- --db /tmp/nexus.db                                   # banco alternativo (criado no primeiro uso, chaves no cofre do SO)
 dotnet test tests/Nexus.Tests                                      # testes do app: ViewModels, serviços, contraste, UI headless

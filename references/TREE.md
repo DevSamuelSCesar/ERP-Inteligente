@@ -48,7 +48,7 @@ erp_inteligente/
 │       ├── Services/ # Testes dos serviços Sqlite (consultas, planos, isolamento entre armazéns)
 │       ├── Fakes/    # Serviços em memória (antigos serviços de demonstração), ScriptedLlmProvider (LLM roteirizado; os testes nunca chamam a API real) e ConceptEmbeddingProvider (embeddings determinísticos por conceito)
 │       ├── TestApp.cs  # AppHost real sobre um TestDatabase, com login dos usuários do seed
-│       └── *.cs      # Fluxo login/shell/expiração, UI headless (incl. proposta do Nexus), ViewModels, tela Skills e skill proposta (SkillsViewModelTests), tela Memórias e linha de memória no Nexus (MemoriesViewModelTests), tela Receitas (RecipesViewModelTests), auditoria, custos, backups e manutenção (OperationsViewModelTests), Configurações, contraste das cores, política de aprovação
+│       └── *.cs      # Fluxo login/shell/expiração, UI headless (incl. proposta do Nexus), ViewModels, tela Skills e skill proposta (SkillsViewModelTests), tela Memórias e linha de memória no Nexus (MemoriesViewModelTests), tela Receitas (RecipesViewModelTests), busca por significado em Configurações (EmbeddingSettingsTests), conjuntos de avaliação e pontuação (EvalTests), auditoria, custos, backups e manutenção (OperationsViewModelTests), Configurações, contraste das cores, política de aprovação
 ├── installer/        # Instaladores (feature 9): build.ps1 (publish self-contained de arquivo único, zip e Inno Setup no Windows, tar.gz no Linux), nexus.iss (instalador por usuário), linux/ (install.sh e nexus.desktop), README.md; out/ fica fora do git
 ├── ROADMAP.md        # Ordem de implementação das features, da fundação à operação
 ├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
@@ -71,6 +71,8 @@ erp_inteligente/
 │       └── test_db.py  # Testes: imutabilidade, escalonamento, authorizer da IA, SQL injection, otimização, cadeia de auditoria v1, migrações 2 → 3, 3 → 4, 4 → 5, 5 → 6, 6 → 7 e 7 → 8, reservas, skills, memórias, receitas, consumo de tokens
 ├── tools/            # Utilitários do repositório
 │   ├── readme_to_pdf.py  # Converte o README.md (com diagramas Mermaid) em PDF via Chrome headless
+│   ├── eval/         # Conjuntos de avaliação do IA.md, seção 5 (planning.json: 50 pedidos com gabarito; knowledge.json: 40 perguntas com fonte e palavras-chave; scope.json: 30 fora do escopo e 10 proativos ou sem direito) e results/ (relatórios do Nexus.Eval)
+│   ├── Nexus.Eval/   # Executor dos conjuntos (console .NET): banco novo com o seed, Planner real, recall@4/recall@1/MRR do RAG sem LLM; chaves só por variável de ambiente; relatório em tools/eval/results
 │   ├── finetune/     # Experimento do Matcher (feature 8): recipes.json (receitas do conjunto), generate_dataset.py (500 pedidos sintéticos, 400/100, 15% fora do escopo, com o prompt do app), evaluate.py (exact match, F1 por campo, JSON válido, "nenhuma receita", regra de adoção), predict_claude.py (linha de base Haiku 5.5 few-shot, SDK anthropic), train_lora.py (LoRA no Qwen2.5-1.5B-Instruct, perda só na resposta, QLoRA opcional, modelo mesclado), serve_local.py (Matcher nexus-matcher e embeddings nexus-embed em 127.0.0.1, formato OpenAI), predict_local.py (previsões do modelo servido), requirements-train.txt, README.md; data/ é gerado, o modelo treinado fica fora do repositório
 │   └── tests/
 │       ├── test_readme_to_pdf.py  # Testes do conversor (HTML seguro, SRI, detecção do Chrome, PDF gerado)

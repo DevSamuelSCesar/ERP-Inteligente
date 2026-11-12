@@ -138,3 +138,18 @@ Exemplo de par de treino:
 **Menos recusas são esperadas.** O modo proativo reduz as recusas de propósito, então o conjunto de avaliação deve incluir casos proativos: entidade inexistente, dado faltando e pedido sem direito. Sem esses casos, uma queda na recusa pareceria melhoria.
 
 Os conjuntos de avaliação são fictícios, versionados junto com o código e rodados a cada mudança de prompt, skill ou modelo.
+
+**Estado (2026-11-11):** os conjuntos estão em `tools/eval` (`planning.json`: 50 pedidos com gabarito; `knowledge.json`: 40 perguntas com documento esperado e palavras-chave; `scope.json`: 30 fora do escopo e 10 proativos ou sem direito), com os dados do seed. O executor `tools/Nexus.Eval` cria um banco novo, roda o Planner real e grava um relatório em `tools/eval/results`. A coerência dos conjuntos (cada operação do gabarito é permitida a quem pede, cada documento existe) e as regras de pontuação são testadas em `EvalTests`.
+
+| Medição | recall@4 | recall@1 | MRR@4 |
+|---------|---------:|---------:|------:|
+| RAG só BM25 | 100% | 80,0% | 0,871 |
+| RAG híbrido, modelo local (`paraphrase-multilingual-MiniLM-L12-v2`) | 100% | 87,5% | 0,927 |
+
+As perguntas usam o vocabulário dos documentos, então o BM25 já acha o documento entre os 4 primeiros; o ganho da busca híbrida aparece na ordem (o certo em 1º lugar). **Pendente (depende da chave do usuário):** os conjuntos que chamam o LLM (planejamento, respostas com fonte, fora do escopo e proativos) e o RAG com `text-embedding-3-small`:
+
+```bash
+ANTHROPIC_API_KEY=... dotnet run --project tools/Nexus.Eval -- --suites all --planner claude:claude-sonnet-5-5 --matcher claude:claude-haiku-5-5
+DEEPSEEK_API_KEY=... dotnet run --project tools/Nexus.Eval -- --suites all
+OPENAI_API_KEY=... dotnet run --project tools/Nexus.Eval -- --embeddings openai
+```

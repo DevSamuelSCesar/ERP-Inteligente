@@ -26,5 +26,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\erp_inteligente.csproj" />
+    <ProjectReference Include="..\..\tools\Nexus.Eval\Nexus.Eval.csproj" />
   </ItemGroup>
 </Project>

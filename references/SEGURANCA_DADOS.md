@@ -271,5 +271,5 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 
 ```bash
 python3 -m unittest discover -s db/tests -v   # 113 testes
-dotnet test tests/Nexus.Tests                 # 1410 testes do app
+dotnet test tests/Nexus.Tests                 # 1416 testes do app
 ```

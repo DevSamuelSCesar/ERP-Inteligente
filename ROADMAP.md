@@ -116,11 +116,19 @@ Backup criptografado pela API do SQLite, job de manutenção de memórias, paine
 - **Link para o plano (2026-11-11):** o quadro do plano no Nexus, em Novo plano e em Receitas tem "Ver plano N em Planos", que abre a tela Planos com o plano selecionado (`UI.md`, seção 6).
 - **Instaladores (`installer/`):** build *self-contained* de arquivo único para Windows (zip e instalador Inno Setup por usuário) e Linux (tar.gz com `install.sh` e atalho). macOS fica de fora até o Keychain ser suportado.
 
+### 10. Conjuntos de avaliação ✅
+Os conjuntos da seção 5 do `IA.md`, versionados, e um executor que mede o RAG sem LLM e o Planner com a chave de um provedor.
+*Estado:* concluída em 2026-11-11.
+- `tools/eval`: 50 pedidos com gabarito, 40 perguntas sobre `knowledge/`, 30 pedidos fora do escopo e 10 proativos ou sem direito, todos sobre os dados fictícios do seed.
+- `tools/Nexus.Eval`: cria um banco novo, roda o Planner real e grava o relatório (Markdown e JSON) em `tools/eval/results`. As chaves vêm só de variáveis de ambiente e ficam na memória do processo.
+- Medido: RAG com recall@4 de 100% (BM25 e híbrido); recall@1 de 80% no BM25 e 87,5% no híbrido com o modelo local.
+- **Pendente (depende da chave do usuário):** rodar os conjuntos que chamam o LLM e o RAG com a OpenAI; os comandos estão no `IA.md`, seção 5.
+
 ## Resumo
 
 ```
 1 Núcleo + acesso → 2 Motor de planos → 3 Planner + chat → 4 Skills
-   → 5 Memória + RAG → 6 Defesas e ataques → 7 Receitas → 8 Multi-provedor + fine-tuning → 9 Operação
+   → 5 Memória + RAG → 6 Defesas e ataques → 7 Receitas → 8 Multi-provedor + fine-tuning → 9 Operação → 10 Avaliação
 ```
 
 O MVP do [`CANVAS.md`](references/CANVAS.md) corresponde às features 1 a 3, às skills `recebimento` e `armazenagem` da 4, ao RAG da 5 e ao núcleo da 6. Receitas, fine-tuning, inventário e expedição ficam fora dele.
