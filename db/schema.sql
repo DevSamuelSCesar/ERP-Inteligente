@@ -401,7 +401,10 @@ CREATE TABLE llm_usage (
     calls             INTEGER NOT NULL CHECK (calls >= 0),
     prompt_tokens     INTEGER NOT NULL CHECK (prompt_tokens >= 0),
     completion_tokens INTEGER NOT NULL CHECK (completion_tokens >= 0),
-    result            TEXT NOT NULL CHECK (result IN ('answer', 'proposals', 'recipe', 'no_match', 'escalated', 'failed'))
+    result            TEXT NOT NULL CHECK (result IN ('answer', 'proposals', 'recipe', 'no_match', 'escalated', 'failed')),
+    -- Part of prompt_tokens read from or written to the provider's prompt cache (migrations/010_llm_usage_cache.sql).
+    cache_read_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (cache_read_tokens >= 0),
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0 CHECK (cache_write_tokens >= 0)
 ) STRICT;
 
 CREATE INDEX llm_usage_by_time ON llm_usage (occurred_at);

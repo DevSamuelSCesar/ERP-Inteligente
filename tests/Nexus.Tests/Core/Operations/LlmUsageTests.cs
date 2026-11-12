@@ -112,4 +112,29 @@ public sealed class LlmUsageTests : IDisposable
         _f.Time.Advance(TimeSpan.FromDays(10));
         Assert.Equal(0, _usage.Report(_f.SessionFor("sup.maria"), _f.Time.GetUtcNow().AddDays(-7)).Requests);
     }
+
+    [Fact]
+    public void Cached_input_is_priced_at_its_share_of_the_input_price()
+    {
+        var choice = new LlmChoice(LlmProviderKind.Claude, LlmSettings.ClaudeStrongModel);
+        _usage.Record(_joao, new LlmUsageEntry(LlmUseRole.Planner, choice, 3, 1_000_000, 100_000, "answer")
+        {
+            CacheReadTokens = 800_000,
+            CacheWriteTokens = 100_000,
+        });
+        // A cached part larger than the prompt is clamped to it.
+        _usage.Record(_joao, new LlmUsageEntry(LlmUseRole.Matcher, new LlmChoice(LlmProviderKind.Claude, LlmSettings.ClaudeFastModel), 1, 100, 10, "no_match")
+        {
+            CacheReadTokens = 5_000,
+        });
+
+        var report = _usage.Report(_f.SessionFor("sup.maria"), _f.Time.GetUtcNow().AddDays(-1));
+
+        var planner = report.Lines.Single(l => l.Role == LlmUseRole.Planner);
+        // Per million: 100k uncached × US$ 2 + 800k read × US$ 0.20 + 100k written × US$ 2.50 + 100k out × US$ 10.
+        Assert.Equal(0.20m + 0.16m + 0.25m + 1.00m, planner.Cost);
+        Assert.Equal(800_000, planner.CacheReadTokens);
+        Assert.Equal(100, Count("SELECT cache_read_tokens FROM llm_usage WHERE role = 'matcher'"));
+        Assert.Equal(0.10m * 0.10m * 100 / 1_000_000m + 0.50m * 10 / 1_000_000m, report.Lines.Single(l => l.Role == LlmUseRole.Matcher).Cost);
+    }
 }

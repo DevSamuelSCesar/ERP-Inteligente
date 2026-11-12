@@ -25,6 +25,7 @@ public sealed class MigrationTests : IDisposable
     private static readonly string[] Version6Scripts = ["schema_v6.sql", "security_v6.sql", "seed_v6.sql"];
     private static readonly string[] Version7Scripts = ["schema_v7.sql", "security_v7.sql", "seed_v7.sql"];
     private static readonly string[] Version8Scripts = ["schema_v8.sql", "security_v8.sql", "seed_v8.sql"];
+    private static readonly string[] Version9Scripts = ["schema_v9.sql", "security_v9.sql", "seed_v9.sql"];
 
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "nexus-tests-" + Guid.NewGuid().ToString("N"));
     private readonly InMemorySecretStore _store = new();
@@ -77,10 +78,17 @@ public sealed class MigrationTests : IDisposable
     private NexusDatabase Open(string? path = null) =>
         DatabaseBootstrapper.OpenOrCreate(path ?? _path, new KeyManager(_store));
 
-    /// <summary>Checks what the current schema (version 7) must have: migrations/007_recipes.sql on top of the version 6 objects.</summary>
+    /// <summary>Checks the current schema (version 10): migrations/010_llm_usage_cache.sql on top of the version 9 objects.</summary>
+    private static void AssertVersion10Schema(SqliteConnection c)
+    {
+        Assert.Equal(10L, Scalar(c, "PRAGMA user_version"));
+        Assert.EndsWith(",result,cache_read_tokens,cache_write_tokens", ColumnList(c, "llm_usage"));
+        AssertVersion9Schema(c);
+    }
+
+    /// <summary>Checks what migrations/009_knowledge_embeddings.sql must have produced on top of the version 8 objects.</summary>
     private static void AssertVersion9Schema(SqliteConnection c)
     {
-        Assert.Equal(9L, Scalar(c, "PRAGMA user_version"));
         Assert.Equal("chunk_id,model,dimensions,sha256,embedding,created_at", ColumnList(c, "knowledge_embeddings"));
         Assert.Equal(1L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE type = 'trigger' AND name = 'knowledge_embeddings_chunk_delete'"));
         AssertVersion8Schema(c);
@@ -89,7 +97,7 @@ public sealed class MigrationTests : IDisposable
     /// <summary>Checks what migrations/008_llm_usage.sql must have produced on top of the version 7 objects.</summary>
     private static void AssertVersion8Schema(SqliteConnection c)
     {
-        Assert.Equal("id,occurred_at,user_id,warehouse_id,role,provider,model,calls,prompt_tokens,completion_tokens,result", ColumnList(c, "llm_usage"));
+        Assert.StartsWith("id,occurred_at,user_id,warehouse_id,role,provider,model,calls,prompt_tokens,completion_tokens,result", ColumnList(c, "llm_usage"));
         Assert.Equal(3L, Scalar(c, "SELECT count(*) FROM sqlite_schema WHERE name IN ('llm_usage_by_time', 'llm_usage_deny_update', 'llm_usage_deny_delete')"));
         AssertVersion7Schema(c);
     }
@@ -199,7 +207,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open();
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
     }
 
     [Fact]
@@ -209,7 +217,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
@@ -221,7 +229,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
     }
@@ -233,7 +241,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM order_reservations"));
@@ -248,7 +256,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(13L, Scalar(c, "SELECT count(*) FROM stock_balances"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
@@ -262,7 +270,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(2L, Scalar(c, "SELECT count(*) FROM plans"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM memories"));
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
@@ -281,7 +289,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.Equal(4L, Scalar(c, "SELECT count(*) FROM audit_log"));
         Assert.True(AuditVerifier.Verify(c).IsValid);
         Exec(c, "INSERT INTO llm_usage (occurred_at, role, provider, model, calls, prompt_tokens, completion_tokens, result) " +
@@ -296,7 +304,7 @@ public sealed class MigrationTests : IDisposable
         using var db = Open(path);
         using var c = db.OpenApplication();
 
-        AssertVersion9Schema(c);
+        AssertVersion10Schema(c);
         Assert.True(AuditVerifier.Verify(c).IsValid);
         Exec(c, "INSERT INTO knowledge_chunks (id, source_path, heading, content, token_count, sha256) VALUES (900, 'knowledge/x.md', 'X', 'texto', 1, 'abc')");
         Exec(c, "INSERT INTO knowledge_embeddings (chunk_id, model, dimensions, sha256, embedding, created_at) " +
@@ -305,6 +313,23 @@ public sealed class MigrationTests : IDisposable
             Exec(c, "UPDATE knowledge_embeddings SET embedding = zeroblob(7) WHERE chunk_id = 900")).Message);
         Exec(c, "DELETE FROM knowledge_chunks WHERE id = 900");
         Assert.Equal(0L, Scalar(c, "SELECT count(*) FROM knowledge_embeddings"));
+    }
+
+    [Fact]
+    public void Version_9_database_is_upgraded_to_10_and_old_usage_rows_have_no_cache_tokens()
+    {
+        var path = CreateLegacyDatabase("v9.db", 9, Version9Scripts);
+        using var db = Open(path);
+        using var c = db.OpenApplication();
+
+        AssertVersion10Schema(c);
+        Assert.True(AuditVerifier.Verify(c).IsValid);
+        Exec(c, "INSERT INTO llm_usage (occurred_at, role, provider, model, calls, prompt_tokens, completion_tokens, result) " +
+                "VALUES ('2026-11-11T10:00:00Z', 'planner', 'claude', 'claude-sonnet-5-5', 1, 10, 5, 'answer')");
+        Assert.Equal(0L, Scalar(c, "SELECT cache_read_tokens + cache_write_tokens FROM llm_usage"));
+        Assert.Contains("CHECK", Assert.Throws<SqliteException>(() =>
+            Exec(c, "INSERT INTO llm_usage (occurred_at, role, provider, model, calls, prompt_tokens, completion_tokens, result, cache_read_tokens) " +
+                    "VALUES ('2026-11-11T10:00:00Z', 'planner', 'claude', 'm', 1, 10, 5, 'answer', -1)")).Message);
     }
 
     [Fact]

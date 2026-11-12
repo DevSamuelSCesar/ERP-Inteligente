@@ -142,6 +142,37 @@ public sealed class MultiProviderTests
     }
 
     [Fact]
+    public async Task Claude_marks_the_stable_prefix_for_prompt_caching_and_counts_cached_tokens()
+    {
+        const string cached = """
+            {"id":"msg_3","type":"message","role":"assistant","model":"claude-sonnet-5-5",
+             "content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,
+             "usage":{"input_tokens":40,"output_tokens":5,"cache_creation_input_tokens":300,"cache_read_input_tokens":2000}}
+            """;
+        var handler = new FakeHandler((_, _) => Json(HttpStatusCode.OK, cached));
+        var claude = new ClaudeProvider(handler, () => Encoding.UTF8.GetBytes(Key));
+        var ct = TestContext.Current.CancellationToken;
+
+        var response = await claude.CompleteAsync(new LlmRequest("claude-sonnet-5-5",
+            [LlmMessage.System("Você é o Nexus."), LlmMessage.User("oi")], [Tool], 1024), ct);
+
+        // Prompt total = uncached input + cache write + cache read.
+        Assert.Equal(new LlmUsage(2340, 5) { CacheReadTokens = 2000, CacheWriteTokens = 300 }, response.Usage);
+        using (var doc = JsonDocument.Parse(handler.Calls[0].Body))
+        {
+            var root = doc.RootElement;
+            Assert.Equal("ephemeral", root.GetProperty("system")[0].GetProperty("cache_control").GetProperty("type").GetString());
+            Assert.Equal("ephemeral", root.GetProperty("cache_control").GetProperty("type").GetString()); // the conversation
+            Assert.False(root.GetProperty("tools")[0].TryGetProperty("cache_control", out _)); // covered by the system breakpoint
+        }
+
+        // Without a system prompt the breakpoint goes on the last tool definition.
+        await claude.CompleteAsync(new LlmRequest("claude-haiku-5-5", [LlmMessage.User("oi")], [Tool], 256), ct);
+        using var noSystem = JsonDocument.Parse(handler.Calls[1].Body);
+        Assert.Equal("ephemeral", noSystem.RootElement.GetProperty("tools")[0].GetProperty("cache_control").GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task Claude_without_a_key_never_calls_the_network()
     {
         var handler = new FakeHandler((_, _) => Json(HttpStatusCode.OK, ClaudeText));

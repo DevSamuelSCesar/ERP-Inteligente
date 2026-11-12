@@ -79,7 +79,15 @@ public sealed record LlmRequest(
     double? Temperature = null,
     LlmProviderKind? Provider = null);
 
-public sealed record LlmUsage(int PromptTokens, int CompletionTokens);
+/// <summary>
+/// Tokens of one call. <see cref="PromptTokens"/> is the whole input, cached or not; <see cref="CacheReadTokens"/> and
+/// <see cref="CacheWriteTokens"/> say how much of it was read from or written to the provider's prompt cache (Claude).
+/// </summary>
+public sealed record LlmUsage(int PromptTokens, int CompletionTokens)
+{
+    public int CacheReadTokens { get; init; }
+    public int CacheWriteTokens { get; init; }
+}
 
 public sealed record LlmResponse(
     string? Content,

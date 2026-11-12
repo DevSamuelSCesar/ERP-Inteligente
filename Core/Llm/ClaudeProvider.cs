@@ -115,15 +115,27 @@ public sealed class ClaudeProvider : ILlmProvider
         }
         FlushResults();
 
+        // Prompt caching: tools, then system, then messages is the prefix order. A breakpoint on the system prompt caches
+        // the tool definitions and the prompt, which repeat on every request; the top-level breakpoint caches the
+        // conversation up to the last message, so each round of the tool loop rereads the earlier rounds from the cache.
         var parameters = new MessageCreateParams
         {
             Model = request.Model,
             MaxTokens = request.MaxTokens,
             Messages = messages,
+            CacheControl = new CacheControlEphemeral(),
         };
-        if (system.Length > 0) parameters = parameters with { System = system };
+        if (system.Length > 0)
+            parameters = parameters with
+            {
+                System = new List<TextBlockParam> { new() { Text = system, CacheControl = new CacheControlEphemeral() } },
+            };
         if (request.Tools.Count > 0)
-            parameters = parameters with { Tools = request.Tools.Select(t => (ToolUnion)ToTool(t)).ToList() };
+        {
+            var tools = request.Tools.Select(ToTool).ToList();
+            if (system.Length == 0) tools[^1] = tools[^1] with { CacheControl = new CacheControlEphemeral() };
+            parameters = parameters with { Tools = tools.Select(t => (ToolUnion)t).ToList() };
+        }
         return parameters;
     }
 
@@ -206,9 +218,18 @@ public sealed class ClaudeProvider : ILlmProvider
             "refusal" => LlmFinishReason.ContentFilter,
             _ => LlmFinishReason.Other,
         };
-        var usage = new LlmUsage((int)Math.Min(int.MaxValue, message.Usage.InputTokens), (int)Math.Min(int.MaxValue, message.Usage.OutputTokens));
+        // InputTokens counts only the uncached part: the prompt total adds what was written to and read from the cache.
+        var cacheWrite = message.Usage.CacheCreationInputTokens ?? 0;
+        var cacheRead = message.Usage.CacheReadInputTokens ?? 0;
+        var usage = new LlmUsage(Clamp(message.Usage.InputTokens + cacheWrite + cacheRead), Clamp(message.Usage.OutputTokens))
+        {
+            CacheReadTokens = Clamp(cacheRead),
+            CacheWriteTokens = Clamp(cacheWrite),
+        };
         return new LlmResponse(text.Length > 0 ? text.ToString() : null, calls, null, finish, usage) { ProviderState = echo };
     }
+
+    private static int Clamp(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
 
     /// <summary>The wire value ("end_turn", "tool_use"...), so a reason added after this SDK version still maps to Other.</summary>
     private static string? StopReasonText(Message message) => message.StopReason?.Raw();

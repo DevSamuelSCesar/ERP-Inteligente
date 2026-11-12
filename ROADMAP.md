@@ -110,6 +110,7 @@ Backup criptografado pela API do SQLite, job de manutenção de memórias, paine
   - sem uso: da IA, nunca usadas, depois de 30 dias; da IA ou do sistema, paradas há 180 dias.
   - As do supervisor nunca são arquivadas pelo job, e nada é apagado.
 - **Consumo de tokens:** migração 008, tabela `llm_usage`, só inserção. O Planner e o Matcher gravam uma linha por pedido, com provedor, modelo, chamadas e tokens, nunca o texto.
+- **Cache de prompt (2026-11-11):** o adaptador do Claude marca o prompt de sistema (com as ferramentas) e a conversa para cache; a migração 010 guarda os tokens lidos e gravados no cache, e o painel cobra a leitura a 10% e a gravação a 125% da entrada.
 - **Telas (`audit.read`):**
   - **Auditoria:** filtros por categoria e por problemas, mais a verificação da cadeia;
   - **Custos de IA:** pedidos, % resolvida por receita, tokens por pedido e custo estimado por papel e modelo, com os preços do `IA.md`.

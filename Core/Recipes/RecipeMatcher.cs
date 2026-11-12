@@ -89,7 +89,11 @@ public sealed class RecipeMatcher(ILlmProvider llm, RecipeStore recipes, IAuditL
 
     /// <summary>Records one Matcher call: <c>recipe</c> when it solved the request, otherwise <c>no_match</c> or <c>failed</c>.</summary>
     public void RecordUsage(UserSession user, LlmChoice choice, LlmUsage tokens, string result) =>
-        usage?.Record(user, new Operations.LlmUsageEntry(LlmUseRole.Matcher, choice, 1, tokens.PromptTokens, tokens.CompletionTokens, result));
+        usage?.Record(user, new Operations.LlmUsageEntry(LlmUseRole.Matcher, choice, 1, tokens.PromptTokens, tokens.CompletionTokens, result)
+        {
+            CacheReadTokens = tokens.CacheReadTokens,
+            CacheWriteTokens = tokens.CacheWriteTokens,
+        });
 
 
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)

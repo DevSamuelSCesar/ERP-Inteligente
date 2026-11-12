@@ -58,7 +58,11 @@ public sealed partial class Planner(
             _ => "failed",
         };
         usage.Record(user, new Operations.LlmUsageEntry(LlmUseRole.Planner, settings.ChoiceFor(LlmUseRole.Planner),
-            state.Calls, state.PromptTokens, state.CompletionTokens, kind));
+            state.Calls, state.PromptTokens, state.CompletionTokens, kind)
+        {
+            CacheReadTokens = state.CacheReadTokens,
+            CacheWriteTokens = state.CacheWriteTokens,
+        });
     }
 
     internal const string ProposePlan = "propose_plan";
@@ -115,11 +119,15 @@ public sealed partial class Planner(
         public int Calls { get; set; }
         public int PromptTokens { get; set; }
         public int CompletionTokens { get; set; }
+        public int CacheReadTokens { get; set; }
+        public int CacheWriteTokens { get; set; }
 
         public void Count(LlmResponse response)
         {
             PromptTokens += Math.Max(0, response.Usage.PromptTokens);
             CompletionTokens += Math.Max(0, response.Usage.CompletionTokens);
+            CacheReadTokens += Math.Max(0, response.Usage.CacheReadTokens);
+            CacheWriteTokens += Math.Max(0, response.Usage.CacheWriteTokens);
         }
     }
 

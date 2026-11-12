@@ -73,7 +73,7 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 
 **Leituras:**
 - As **receitas** são o que mais reduz o custo: sair de 70% para 40% de planejamento corta ~43% do gasto.
-- O **cache de prompt** (prompt de sistema + definições de ferramentas, que se repetem em todo pedido) não entrou na conta e reduz ainda mais o custo de entrada.
+- O **cache de prompt** (prompt de sistema + definições de ferramentas, que se repetem em todo pedido) não entrou na conta e reduz ainda mais o custo de entrada. **Estado (2026-11-11):** o adaptador do Claude marca um ponto de cache no prompt de sistema (que cobre as ferramentas, que vêm antes) e ativa o cache automático da conversa, então cada rodada do laço de ferramentas relê as anteriores do cache (leitura a 10% do preço de entrada). Os tokens lidos e gravados no cache voltam em `LlmUsage` e ficam em `llm_usage` (migração 010); o painel de custos cobra a leitura a 10% e a gravação a 125% do preço de entrada.
 - Haiku em tudo é ~20× mais barato, mas fica como opção configurável: o Planner é onde erros custam mais.
 
 ## 2.1 Skills sob demanda (feature 4)
