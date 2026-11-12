@@ -50,6 +50,7 @@ erp_inteligente/
 │       ├── TestApp.cs  # AppHost real sobre um TestDatabase, com login dos usuários do seed
 │       └── *.cs      # Fluxo login/shell/expiração, UI headless (incl. proposta do Nexus), ViewModels, tela Skills e skill proposta (SkillsViewModelTests), tela Memórias e linha de memória no Nexus (MemoriesViewModelTests), tela Receitas (RecipesViewModelTests), busca por significado em Configurações (EmbeddingSettingsTests), conjuntos de avaliação e pontuação (EvalTests), auditoria, custos, backups e manutenção (OperationsViewModelTests), Configurações, contraste das cores, política de aprovação
 ├── installer/        # Instaladores (feature 9): build.ps1 (publish self-contained de arquivo único, zip e Inno Setup no Windows, tar.gz no Linux), nexus.iss (instalador por usuário), linux/ (install.sh e nexus.desktop), README.md; out/ fica fora do git
+├── PENDENCIAS.md     # O que ficou pendente após as features 1 a 10: medições que dependem de chave de API (com os comandos) e melhorias opcionais
 ├── ROADMAP.md        # Ordem de implementação das features, da fundação à operação
 ├── README.md         # Entrega do grupo: problema, canvas, diagramas, UML, partes de IA, Segurança e integração
 ├── db/               # Banco SQLite: scripts de criação, segurança, carga e desempenho
