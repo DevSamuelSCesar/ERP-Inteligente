@@ -43,13 +43,19 @@ Skills no formato dos agentes de IA (`SKILL.md` com frontmatter `nome`, `descric
 ### 5. Memória e RAG ✅
 Tabela `memories` com filtro de proteção, busca FTS5 por escopo e confiança; indexação de `knowledge/` com embeddings e `sqlite-vec`, busca híbrida (BM25 + vetor + RRF) e injeção dos trechos como dados delimitados.
 *Por que junto:* os dois são recuperação de texto livre no mesmo contexto do Planner e compartilham índices e delimitação anti-injection.
-*Estado:* concluída em 2026-11-08, com BM25 apenas.
+*Estado:* concluída em 2026-11-08 com BM25; a busca híbrida com embeddings entrou em 2026-11-11.
 - Memórias por armazém, com status, origem e autor (migração 006). A IA grava pelo filtro (`remember`), e a rejeição de um plano da IA vira uma correção. Só o supervisor (`memory.manage`) cria, corrige e arquiva, na tela Memórias.
 - `knowledge/` é indexado na abertura. Memórias e trechos relevantes entram no pedido como dados delimitados, e há as ferramentas `search_knowledge` e `search_memories`.
 - **Confiança pelos resultados (2026-11-11, `Core/Memory/MemoryFeedback`):** as memórias que a IA tinha à frente ao propor um plano ficam registradas com ele (na auditoria `plan.submit`). Plano executado: +0,05 em cada uma. Plano rejeitado pelo supervisor: −0,15, o que tira de uso uma memória nova da IA (o contexto só usa confiança ≥ 0,3) até ela ser reforçada.
 - **Memórias de erros recorrentes (2026-11-11):** o mesmo código de erro 3 vezes em 30 dias no armazém (proposta recusada pelo validador no Planner ou plano que falhou) vira uma memória `pattern` de origem `system`, uma por código.
 - O job de manutenção de memórias foi feito na feature 9.
-- **Pendente:** embeddings, `sqlite-vec` e a busca híbrida com RRF (decisão de usar só BM25 por enquanto).
+- **Busca híbrida (2026-11-11):**
+  - migração 009 (schema na versão 9): `knowledge_embeddings`, um vetor float32 por trecho, que sai junto com o trecho;
+  - `Core/Knowledge/KnowledgeVectorIndex` gera só os vetores que faltam (trecho novo ou alterado, ou modelo trocado) e calcula a distância pelo `sqlite-vec` (NuGet oficial), com o mesmo cálculo em C# se a extensão não carregar;
+  - `KnowledgeRetriever.SearchHybridAsync` funde o top-20 do BM25 e o top-20 por cosseno por RRF; o contexto automático e `search_knowledge` usam a busca híbrida, e um trecho achado só pelo significado precisa passar do limiar do modelo;
+  - em Configurações, "Busca por significado": desligada (padrão), OpenAI `text-embedding-3-small` ou o modelo local `nexus-embed` (servido por `tools/finetune/serve_local.py`), com o botão "Indexar procedimentos";
+  - desvio: tabela comum em vez da virtual `vec0` (22 documentos não pedem índice, e o arquivo segue legível sem a extensão).
+- **Pendente (depende de dados do usuário):** medir a busca com a OpenAI, que precisa da chave dela. O modelo local foi medido nos 22 documentos e define os limiares dele.
 
 ## Segurança e economia
 

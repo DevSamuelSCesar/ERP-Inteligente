@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using erp_inteligente.Core.Audit;
+using erp_inteligente.Core.Knowledge;
 using erp_inteligente.Core.Llm;
 using erp_inteligente.Core.Policy;
 using erp_inteligente.Models;
@@ -16,9 +17,56 @@ namespace erp_inteligente.Services;
 /// audited without the value of a key. Keys never leave the OS key store except to authenticate a request. The members
 /// without a provider argument are DeepSeek's, as before.
 /// </summary>
+/// <param name="vectors">The vectors of the hybrid RAG search; null hides the embeddings section (tests without it).</param>
 public sealed class LlmSettingsService(
-    LlmSettings settings, PolicyEngine policy, IAuditLog audit, Func<LlmProviderKind, CancellationToken, Task> testConnection)
+    LlmSettings settings, PolicyEngine policy, IAuditLog audit, Func<LlmProviderKind, CancellationToken, Task> testConnection,
+    KnowledgeVectorIndex? vectors = null)
 {
+    // ---- embeddings of the RAG (feature 5) -------------------------------------------------------------------
+
+    public bool HasEmbeddings => vectors is not null;
+
+    /// <summary>The embeddings provider; null = off (search by words only).</summary>
+    public LlmChoice? EmbeddingChoice => settings.EmbeddingChoice;
+
+    /// <exception cref="PolicyDeniedException">The user is not an administrator (the denial is audited).</exception>
+    /// <exception cref="ArgumentException">The provider cannot embed.</exception>
+    public void SetEmbeddingChoice(UserSession user, LlmChoice? choice)
+    {
+        policy.Require(user, Permissions.UserManage);
+        if (settings.EmbeddingChoice == choice) return;
+        settings.EmbeddingChoice = choice;
+        audit.Append(new AuditEntry(AuditActorType.User, user.UserId, null, "llm.embedding.set", "llm:embedding",
+            AuditOutcome.Allowed, new JsonObject
+            {
+                ["provider"] = choice?.Provider.ToString().ToLowerInvariant() ?? "off",
+                ["model"] = choice?.Model,
+            }.ToJsonString()));
+    }
+
+    /// <summary>How many procedure chunks have a vector of the current model.</summary>
+    public VectorCoverage? Coverage() => vectors?.Coverage();
+
+    /// <summary>Embeds the chunks still without a vector (administrator only). Returns null on success, otherwise a message.</summary>
+    /// <exception cref="PolicyDeniedException">The user is not an administrator (the denial is audited).</exception>
+    public async Task<string?> IndexAsync(UserSession user, CancellationToken cancellationToken = default)
+    {
+        policy.Require(user, Permissions.UserManage);
+        if (vectors is null || settings.EmbeddingChoice is not { } choice) return "A busca por significado está desligada.";
+        var result = await vectors.SyncAsync(cancellationToken);
+        if (result.Error is not { } error) return null;
+        var name = choice.Provider == LlmProviderKind.Local ? "Modelo local" : LlmSettings.ProviderName(choice.Provider);
+        return error switch
+        {
+            LlmErrorKind.NotConfigured => choice.Provider == LlmProviderKind.Local ? "A porta do modelo local é inválida." : "Sem chave da OpenAI: salve a chave acima.",
+            LlmErrorKind.Unauthorized => $"{name}: a chave foi recusada.",
+            LlmErrorKind.RateLimited => $"{name}: limite de uso atingido. Tente mais tarde.",
+            LlmErrorKind.Timeout => $"{name}: não respondeu a tempo.",
+            LlmErrorKind.Unavailable => $"{name}: não foi possível conectar" + (choice.Provider == LlmProviderKind.Local ? "; o servidor local está rodando?" : "."),
+            _ => $"{name}: resposta inválida.",
+        } + $" {result.Embedded} trecho(s) indexado(s), {result.Pending} pendente(s).";
+    }
+
     public const string ProviderName = "DeepSeek";
 
     public IReadOnlyList<string> Models => LlmSettings.SupportedModels;

@@ -132,6 +132,7 @@ Memórias e trechos de procedimento entram no contexto da IA. Uma memória malic
 3. **Confiança baixa:** memórias da IA começam em 0,3; só sobem se repetidas ou se o plano em que foram usadas for executado (+0,05), caem 0,15 quando o supervisor rejeita esse plano (e saem do contexto abaixo de 0,3), e o supervisor arquiva o que estiver errado. Memórias de erros recorrentes levam a mensagem do validador, nunca o texto do modelo.
 4. **Isolamento:** toda leitura e escrita é filtrada pelo armazém da sessão; a IA não lê as tabelas diretamente.
 5. **Rastreabilidade:** cada gravação, reforço, correção e arquivamento é auditado sem o conteúdo, e o contexto injetado é auditado (`ai.context`) com ids e caminhos.
+6. **Embeddings (busca híbrida, 2026-11-11):** desligados por padrão; só o administrador escolhe o provedor (auditado como `llm.embedding.set`). A pergunta vai ao provedor mascarada pelo `SensitiveDataRedactor`; o cliente só aceita `api.openai.com` ou `127.0.0.1` e não segue redirecionamentos, e o erro nunca leva a chave nem o corpo. Os vetores ficam em `knowledge_embeddings`, que a conexão da IA não lê (*authorizer*). O `sqlite-vec` é carregado só na conexão da aplicação e o carregamento de extensões volta a ficar desligado logo depois (a função SQL `load_extension()` continua recusada). Um trecho entra no contexto só pelo significado apenas acima do limiar de contexto, e o detector de injeção examina o trecho do mesmo jeito que os achados por palavra.
 
 Risco residual: um fato operacional errado, mas inofensivo na forma, passa no filtro. Por isso a tela Memórias mostra origem, confiança e uso, e o motor continua validando todo plano.
 
@@ -265,8 +266,10 @@ dotnet test tests/Nexus.Tests --filter "FullyQualifiedName~PromptInjectionSuite"
 | Dado hostil marcado, auditado como `ai.injection` e avisado; mensagens próprias e argumentos ecoados não são examinados | `InjectionDefenseTests` e `InjectionDetectorTests` (C#) | Automatizado ✅ |
 | Suíte de 25 ataques de prompt injection, exfiltração e SQL injection com métricas | `PromptInjectionSuiteTests` (C#) | Automatizado ✅ |
 | Receitas: IA ou operador promovendo, descrição com instrução, parâmetro com SQL ou campo extra, receita fora das oferecidas pelo Matcher, pedido suspeito usando o atalho, apagar ou alterar o modelo | `RecipeStoreTests`, `RecipeTemplateTests`, `RecipeMatcherTests` e `RecipesViewModelTests` (C#); `RecipeTests` e `MigrationTo7Tests` (Python) | Automatizado ✅ |
+| Memória contrariada e erros recorrentes: confiança que cai com a rejeição e sai do contexto, memória de erro com texto do modelo, memória repetida por código | `MemoryFeedbackTests` e `MemoryContextTests` (C#) | Automatizado ✅ |
+| Embeddings: CPF ou e-mail na pergunta enviada ao provedor, envio para host que não seja a OpenAI ou `127.0.0.1`, chave em erros, leitura dos vetores pela IA, `load_extension()` liberado depois do `sqlite-vec`, vetor com tamanho errado, troca de provedor por quem não é administrador, falha do provedor quebrando o pedido | `EmbeddingsClientTests`, `HybridSearchTests`, `EmbeddingSettingsTests`, `MemoryContextTests` e `MigrationTests` (C#); `KnowledgeEmbeddingTests` e `MigrationTo9Tests` (Python) | Automatizado ✅ |
 
 ```bash
-python3 -m unittest discover -s db/tests -v   # 108 testes
-dotnet test tests/Nexus.Tests                 # 1377 testes do app
+python3 -m unittest discover -s db/tests -v   # 113 testes
+dotnet test tests/Nexus.Tests                 # 1410 testes do app
 ```

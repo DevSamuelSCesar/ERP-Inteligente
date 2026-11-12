@@ -13,6 +13,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "finetun
 
 import evaluate  # noqa: E402
 import generate_dataset  # noqa: E402
+import serve_local  # noqa: E402
+import train_lora  # noqa: E402
 
 
 class DatasetTests(unittest.TestCase):
@@ -116,3 +118,70 @@ class EvaluateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServeLocalTests(unittest.TestCase):
+    """Request validation and response shapes of the local server (the models themselves are not loaded here)."""
+
+    def test_chat_request_keeps_only_text_messages_and_caps_the_tokens(self):
+        messages, limit = serve_local.parse_chat({"model": "nexus-matcher", "max_tokens": 9999, "messages": [
+            {"role": "system", "content": "s", "extra": 1}, {"role": "user", "content": "u"}]})
+        self.assertEqual(messages, [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
+        self.assertEqual(limit, serve_local.MAX_NEW_TOKENS)
+
+    def test_chat_request_is_validated(self):
+        for body in ({"model": "gpt-5", "messages": [{"role": "user", "content": "x"}]},
+                     {"model": "nexus-matcher", "messages": []},
+                     {"model": "nexus-matcher", "messages": [{"role": "tool", "content": "x"}]},
+                     {"model": "nexus-matcher", "messages": [{"role": "user", "content": "x"}], "max_tokens": 0}):
+            with self.subTest(body=body), self.assertRaises(serve_local.BadRequest):
+                serve_local.parse_chat(body)
+
+    def test_embeddings_request_accepts_a_string_or_a_list(self):
+        self.assertEqual(serve_local.parse_embeddings({"model": "nexus-embed", "input": "a"}), ["a"])
+        self.assertEqual(serve_local.parse_embeddings({"model": "nexus-embed", "input": ["a", "b"]}), ["a", "b"])
+        for body in ({"model": "x", "input": "a"}, {"model": "nexus-embed", "input": []},
+                     {"model": "nexus-embed", "input": ["a"] * 65}, {"model": "nexus-embed", "input": [1]}):
+            with self.subTest(body=body), self.assertRaises(serve_local.BadRequest):
+                serve_local.parse_embeddings(body)
+
+    def test_responses_have_the_openai_shape_the_app_reads(self):
+        chat = serve_local.chat_response('{"intent":"none"}', 10, 5)
+        self.assertEqual(chat["choices"][0]["message"], {"role": "assistant", "content": '{"intent":"none"}'})
+        self.assertEqual(chat["usage"]["total_tokens"], 15)
+        emb = serve_local.embeddings_response([[0.5, 1], [2, 3]], 7)
+        self.assertEqual([d["index"] for d in emb["data"]], [0, 1])
+        self.assertEqual(emb["data"][1]["embedding"], [2.0, 3.0])
+        self.assertEqual(emb["usage"]["prompt_tokens"], 7)
+
+    def test_server_binds_only_to_loopback(self):
+        self.assertEqual(serve_local.HOST, "127.0.0.1")
+
+
+class TrainLabelTests(unittest.TestCase):
+    """The loss covers only the answer: prompt tokens are masked with -100."""
+
+    class Tokenizer:
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+            text = "".join(f"<{m['role']}>{m['content']}" for m in messages)
+            return text + ("<assistant>" if add_generation_prompt else "")
+
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": [ord(c) for c in text]}
+
+    def test_only_answer_tokens_are_labelled(self):
+        messages = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"},
+                    {"role": "assistant", "content": "{}"}]
+        row = train_lora.encode(self.Tokenizer(), messages, 1024)
+        prompt_len = len("<system>S<user>U<assistant>")
+        self.assertEqual(row["labels"][:prompt_len], [train_lora.IGNORE] * prompt_len)
+        self.assertEqual(row["labels"][prompt_len:], [ord("{"), ord("}")])
+        self.assertEqual(len(row["input_ids"]), len(row["attention_mask"]))
+
+    def test_truncation_keeps_labels_aligned(self):
+        messages = [{"role": "system", "content": "S" * 50}, {"role": "user", "content": "U"},
+                    {"role": "assistant", "content": "{}"}]
+        row = train_lora.encode(self.Tokenizer(), messages, 10)
+        self.assertEqual(len(row["labels"]), 10)
+        self.assertTrue(all(t == train_lora.IGNORE for t in row["labels"]))
+

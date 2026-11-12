@@ -92,12 +92,12 @@ No início, 70% dos pedidos passam pelo planejamento e 30% por receitas. Com o u
 
 | Etapa | Definição |
 |-------|-----------|
-| Estado | Feature 5 (2026-11-08): **só BM25** (FTS5, sem acento). Os embeddings e a busca híbrida ficam para uma etapa futura |
+| Estado | Feature 5: BM25 em 2026-11-08; **busca híbrida em 2026-11-11** (BM25 + cosseno, RRF). Os embeddings são opcionais e ficam desligados até o administrador escolher o provedor em Configurações |
 | Fontes | `knowledge/*.md` (22 documentos fictícios, embutidos e indexados na abertura). As skills não entram: são carregadas sob demanda por `load_skill` |
 | Chunking | Um trecho por seção `##`, prefixado com título do documento e da seção; seções acima de ~500 tokens divididas com ~50 tokens de sobreposição |
-| Embeddings | `text-embedding-3-small`, 1.536 dimensões |
-| Banco vetorial | `sqlite-vec` no mesmo arquivo SQLite (`knowledge_vec`), ligado a `knowledge_chunks` |
-| Busca | Híbrida: FTS5/BM25 + cosseno, fundidos por Reciprocal Rank Fusion; top-4 no contexto |
+| Embeddings | `text-embedding-3-small` (OpenAI, 1.536 dimensões) ou o modelo local `nexus-embed` (`paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensões, em `127.0.0.1`, sem custo e sem envio de dados) |
+| Banco vetorial | `knowledge_embeddings` no mesmo arquivo SQLite (float32, um vetor por trecho), com a distância calculada pelo `sqlite-vec` |
+| Busca | Híbrida: top-20 FTS5/BM25 + top-20 por cosseno, fundidos por Reciprocal Rank Fusion. Até 2 trechos no contexto automático e até 5 em `search_knowledge`. Similaridade mínima para um trecho achado só pelo significado: 0,30 (busca) e 0,50 (contexto) na OpenAI; 0,40 e 0,55 no modelo local |
 | Uso no prompt | Trechos delimitados como dados de referência, com a origem (`POP-03`, `POL-17`...) para citação |
 
 ### Base de documentos inicial

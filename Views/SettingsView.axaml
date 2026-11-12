@@ -112,6 +112,22 @@
                     <Rectangle Classes="rule" />
                 </StackPanel>
 
+                <!-- Embeddings of the RAG search (feature 5): off, OpenAI or the local model -->
+                <StackPanel IsVisible="{Binding HasEmbeddings}">
+                    <Grid ColumnDefinitions="200,Auto,Auto,*" Margin="0,10">
+                        <TextBlock Classes="label" Text="Busca por significado" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="1" MinWidth="300" ItemsSource="{Binding EmbeddingOptions}"
+                                  SelectedItem="{Binding SelectedEmbedding}" IsEnabled="{Binding CanConfigure}" />
+                        <Button Grid.Column="2" Classes="neutral" Margin="8,0,0,0" Command="{Binding IndexCommand}"
+                                IsVisible="{Binding CanConfigure}"
+                                ToolTip.Tip="Gera os vetores dos trechos de procedimento que ainda não têm">
+                            <TextBlock Text="Indexar procedimentos" />
+                        </Button>
+                    </Grid>
+                    <TextBlock Classes="secondary" Margin="200,0,0,10" TextWrapping="Wrap" Text="{Binding EmbeddingStatusText}" />
+                    <Rectangle Classes="rule" />
+                </StackPanel>
+
                 <!-- Feedback: a line with icon and text, never a toast -->
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="200,10,0,0">
                     <PathIcon Classes="spinning info" Data="{StaticResource Icon.Progress}" Width="14" Height="14"

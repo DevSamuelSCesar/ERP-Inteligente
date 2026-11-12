@@ -19,11 +19,11 @@ public sealed class TestApp : IDisposable
 
     private readonly TestDatabase _db = new();
 
-    public TestApp(TimeProvider? time = null, ILlmProvider? llm = null)
+    public TestApp(TimeProvider? time = null, ILlmProvider? llm = null, System.Net.Http.HttpMessageHandler? embeddingsHandler = null)
     {
         Time = time ?? new ManualTimeProvider(new DateTimeOffset(2026, 11, 7, 12, 0, 0, TimeSpan.Zero));
         Llm = llm ?? new ScriptedLlmProvider();
-        Host = new AppHost(_db.Database, Time, new Argon2Parameters(1024, 1, 1), AuthOptions.Default, _db.Store, Llm);
+        Host = new AppHost(_db.Database, Time, new Argon2Parameters(1024, 1, 1), AuthOptions.Default, _db.Store, Llm, embeddingsHandler: embeddingsHandler);
     }
 
     public ILlmProvider Llm { get; }

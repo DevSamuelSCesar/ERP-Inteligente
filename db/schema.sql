@@ -351,6 +351,22 @@ CREATE TRIGGER knowledge_fts_delete AFTER DELETE ON knowledge_chunks BEGIN
     INSERT INTO knowledge_fts (knowledge_fts, rowid, heading, content) VALUES ('delete', old.id, old.heading, old.content);
 END;
 
+-- One vector per chunk: little-endian float32, the format sqlite-vec reads. A plain table, not a vec0 virtual table,
+-- so the file stays readable without the extension; sqlite-vec computes the distance when it is loaded.
+CREATE TABLE knowledge_embeddings (
+    chunk_id   INTEGER PRIMARY KEY REFERENCES knowledge_chunks (id) ON DELETE CASCADE,
+    model      TEXT NOT NULL CHECK (length(model) BETWEEN 1 AND 120),
+    dimensions INTEGER NOT NULL CHECK (dimensions BETWEEN 1 AND 4096),
+    sha256     TEXT NOT NULL,
+    embedding  BLOB NOT NULL CHECK (length(embedding) = 4 * dimensions),
+    created_at TEXT NOT NULL
+) STRICT;
+
+-- A replaced or removed chunk drops its vector even on a connection without foreign keys.
+CREATE TRIGGER knowledge_embeddings_chunk_delete AFTER DELETE ON knowledge_chunks BEGIN
+    DELETE FROM knowledge_embeddings WHERE chunk_id = old.id;
+END;
+
 -- ---------------------------------------------------------------------------
 -- Audit (append-only, hash-chained by the application with rule v1: see audit_hash_v1 in db/tests/test_db.py)
 -- ---------------------------------------------------------------------------

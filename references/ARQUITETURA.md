@@ -279,10 +279,10 @@ Tabela `memories` no SQLite:
 |-------|---------|
 | Fontes | Procedimentos e políticas do armazém (`knowledge/*.md`), `SKILL.md` das skills e descrições de receitas |
 | Chunking | Um trecho por seção `##` do Markdown, com o título do documento e da seção no início do trecho; seções acima de ~500 tokens são divididas com sobreposição de ~50 tokens |
-| Embeddings | **Etapa futura** (decisão de 2026-11-08: só BM25 por enquanto). Opções: `text-embedding-3-small` (OpenAI, 1.536 dimensões) ou um modelo aberto local; Anthropic e DeepSeek não oferecem API de embeddings. A interface `IEmbeddingProvider` já existe, sem uso |
-| Banco vetorial | `sqlite-vec` (tabela virtual `vec0`) no mesmo arquivo SQLite, ligada a `knowledge_chunks` |
-| Busca | Hoje: FTS5/BM25 (título da seção com peso 2). Com os embeddings: híbrida, top-20 do BM25 + top-20 por cosseno, combinados por *Reciprocal Rank Fusion* |
-| Atualização | Os documentos vêm embutidos no app e são indexados na abertura (`KnowledgeIndexer`); cada trecho guarda o SHA-256 e só trechos alterados são regravados |
+| Embeddings | Escolhidos pelo administrador em Configurações ("Busca por significado"), desligados por padrão: `text-embedding-3-small` (OpenAI, 1.536 dimensões, com a chave da OpenAI) ou um modelo local em `127.0.0.1` (`nexus-embed`, servido por `tools/finetune/serve_local.py` com `paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensões). Anthropic e DeepSeek não oferecem API de embeddings. Cada vetor guarda o modelo (`provedor:modelo`): trocar de modelo gera todos de novo, e vetores de modelos diferentes nunca são comparados |
+| Banco vetorial | `knowledge_embeddings` (migração 009): um vetor float32 por trecho, ligado a `knowledge_chunks` (sai junto com o trecho, por trigger). A distância é calculada pelo `sqlite-vec` (`vec_distance_cosine`, NuGet `sqlite-vec`), carregado só na conexão da aplicação; sem a extensão, o app calcula o cosseno em C# com o mesmo resultado. **Desvio do plano original:** tabela comum em vez da virtual `vec0`, porque com 22 documentos (60 trechos) a varredura exata basta e o arquivo continua legível sem a extensão. A `vec0` fica para quando o volume pedir índice |
+| Busca | Híbrida quando há embeddings: top-20 do FTS5/BM25 (título com peso 2) + top-20 por cosseno, combinados por *Reciprocal Rank Fusion* (soma de 1 / (60 + posição)). Um trecho achado só pelo significado precisa de uma similaridade mínima, maior no contexto automático do que em `search_knowledge` (por modelo: OpenAI 0,30 e 0,50; local 0,40 e 0,55, medidos nos 22 documentos). A pergunta vai ao provedor mascarada (`SensitiveDataRedactor`), com limite de 5 s; sem embeddings ou com falha, a busca é exatamente a BM25 |
+| Atualização | Os documentos vêm embutidos no app e são indexados na abertura (`KnowledgeIndexer`); cada trecho guarda o SHA-256 e só trechos alterados são regravados. Os vetores que faltam (trecho novo, alterado ou modelo trocado) são gerados em segundo plano na abertura, ao escolher o provedor e pelo botão "Indexar procedimentos" (`KnowledgeVectorIndex`) |
 
 Os trechos recuperados entram no prompt **delimitados como dados de referência**, com o caminho do documento de origem, e nunca como instruções (seção 12.8).
 
@@ -374,7 +374,7 @@ Experimento para reduzir custo e dependência de rede na etapa mais frequente: t
 | Planos | Plano JSON, status (`validating`, `pending_approval`, `rejected`, `executed`, `failed`), diff simulado, tentativas, aprovador, quem rejeitou e o motivo (`rejected_by`, `rejection_reason`), causa da falha (`failure_reason`) |
 | Receitas | Plano parametrizado, parâmetros, versões da DSL e da skill, estatísticas de uso e falha |
 | Memórias | Tabela `memories` + índice FTS5 |
-| Conhecimento (RAG) | `knowledge_chunks` + índice FTS5 + vetores `sqlite-vec` |
+| Conhecimento (RAG) | `knowledge_chunks` + índice FTS5 + vetores em `knowledge_embeddings` (distância pelo `sqlite-vec`) |
 | Acesso | `roles`, `role_permissions` (ALLOW/DENY), `users` |
 | Auditoria | `audit_log` encadeado por hash |
 

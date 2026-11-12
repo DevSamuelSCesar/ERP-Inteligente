@@ -70,7 +70,8 @@ internal static partial class PlannerTools
     internal static ToolOutcome ExecuteSearchKnowledge(KnowledgeRetriever retriever, JsonElement args)
     {
         var limit = Math.Clamp(Number(args, "limit") ?? 3, 1, MaxKnowledgeLimit);
-        var hits = retriever.Search(Text(args, "query")!, limit);
+        // Runs on a worker thread (RunTool); the query embedding is bounded by KnowledgeRetriever.QueryEmbeddingTimeout.
+        var hits = retriever.SearchHybridAsync(Text(args, "query")!, limit).GetAwaiter().GetResult();
         var rows = hits.Select(h => new JsonObject
         {
             ["source"] = h.SourcePath,

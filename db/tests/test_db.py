@@ -30,11 +30,13 @@ MIGRATION_005 = DB_DIR / "migrations" / "005_skills.sql"
 MIGRATION_006 = DB_DIR / "migrations" / "006_memory.sql"
 MIGRATION_007 = DB_DIR / "migrations" / "007_recipes.sql"
 MIGRATION_008 = DB_DIR / "migrations" / "008_llm_usage.sql"
+MIGRATION_009 = DB_DIR / "migrations" / "009_knowledge_embeddings.sql"
 V3_SCRIPTS = ("schema_v3.sql", "security_v3.sql", "seed_v3.sql")
 V4_SCRIPTS = ("schema_v4.sql", "security_v4.sql", "seed_v4.sql")
 V5_SCRIPTS = ("schema_v5.sql", "security_v5.sql", "seed_v5.sql")
 V6_SCRIPTS = ("schema_v6.sql", "security_v6.sql", "seed_v6.sql")
 V7_SCRIPTS = ("schema_v7.sql", "security_v7.sql", "seed_v7.sql")
+V8_SCRIPTS = ("schema_v8.sql", "security_v8.sql", "seed_v8.sql")
 # Schema version 2 scripts (git commit d145eee), kept as C# fixtures and shared with the C# migration tests.
 V2_FIXTURES = DB_DIR.parent / "tests" / "Nexus.Tests" / "Core" / "Data" / "Fixtures"
 V2_SCRIPTS = ("schema_v2.sql", "security_v2.sql", "seed_v2.sql")
@@ -465,6 +467,7 @@ class MigrationTo3Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -625,6 +628,7 @@ class MigrationTo4Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -674,6 +678,7 @@ class MigrationTo5Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -835,6 +840,7 @@ class MigrationTo6Tests(unittest.TestCase):
         self.migrated.executescript(MIGRATION_006.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -897,6 +903,7 @@ class MigrationTo7Tests(unittest.TestCase):
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_007.read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -934,6 +941,7 @@ class MigrationTo8Tests(unittest.TestCase):
         for name in V7_SCRIPTS:
             self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
         self.migrated.executescript(MIGRATION_008.read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.fresh.close()
@@ -950,6 +958,71 @@ class MigrationTo8Tests(unittest.TestCase):
             "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('llm_usage') ORDER BY cid")
         self.assertSameRows("SELECT name, sql FROM sqlite_schema WHERE name IN ('llm_usage_by_time', "
                             "'llm_usage_deny_update', 'llm_usage_deny_delete') ORDER BY name")
+
+
+class MigrationTo9Tests(unittest.TestCase):
+    """A version 8 database upgraded by migrations/009 must match a fresh install (knowledge_embeddings)."""
+
+    def setUp(self):
+        self.fresh = sqlite3.connect(":memory:")
+        load_scripts(self.fresh, BASE_SCRIPTS)
+        self.migrated = sqlite3.connect(":memory:")
+        self.migrated.execute("PRAGMA foreign_keys = ON")
+        for name in V8_SCRIPTS:
+            self.migrated.executescript((V2_FIXTURES / name).read_text(encoding="utf-8"))
+        self.migrated.executescript(MIGRATION_009.read_text(encoding="utf-8"))
+
+    def tearDown(self):
+        self.fresh.close()
+        self.migrated.close()
+
+    def assertSameRows(self, query):
+        self.assertEqual(self.migrated.execute(query).fetchall(), self.fresh.execute(query).fetchall(), query)
+
+    def test_schema_objects_match_fresh_install(self):
+        self.assertSameRows("SELECT type, name FROM sqlite_schema ORDER BY 1, 2")
+
+    def test_embedding_table_and_trigger_match_fresh_install(self):
+        self.assertSameRows(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('knowledge_embeddings') ORDER BY cid")
+        self.assertSameRows("SELECT name, sql FROM sqlite_schema WHERE name = 'knowledge_embeddings_chunk_delete'")
+
+
+class KnowledgeEmbeddingTests(DatabaseTestCase):
+    """knowledge_embeddings: float32 vectors tied to their chunk, never readable by the AI."""
+
+    def add(self, chunk_id=900, dims=2, blob=None):
+        self.conn.execute("INSERT OR IGNORE INTO knowledge_chunks (id, source_path, heading, content, token_count, sha256) "
+                          "VALUES (?, 'knowledge/x.md', 'X', 'texto', 1, 'abc')", (chunk_id,))
+        blob = bytes(4 * dims) if blob is None else blob
+        self.conn.execute("INSERT INTO knowledge_embeddings (chunk_id, model, dimensions, sha256, embedding, created_at) "
+                          "VALUES (?, 'm', ?, 'abc', ?, '2026-11-11T10:00:00Z')", (chunk_id, dims, blob))
+
+    def test_blob_length_matches_dimensions(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add(blob=bytes(7))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.add(dims=0, blob=b"")
+        self.add()
+
+    def test_vector_goes_with_its_chunk(self):
+        self.add()
+        self.conn.commit()
+        self.conn.execute("PRAGMA foreign_keys = OFF")  # the trigger works without foreign keys too
+        self.conn.execute("DELETE FROM knowledge_chunks WHERE id = 900")
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM knowledge_embeddings").fetchone(), (0,))
+
+    def test_ai_cannot_read_vectors(self):
+        self.add()
+        self.conn.commit()
+        ai = sqlite3.connect(":memory:")
+        try:
+            self.conn.backup(ai)
+            ai.set_authorizer(ai_authorizer)
+            with self.assertRaises(sqlite3.DatabaseError):
+                ai.execute("SELECT embedding FROM knowledge_embeddings").fetchall()
+        finally:
+            ai.close()
 
 
 class LlmUsageTests(DatabaseTestCase):

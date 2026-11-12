@@ -187,7 +187,23 @@ public sealed partial class Planner(
             messages.Add(LlmMessage.User(turn.Request));
             messages.Add(LlmMessage.Assistant(turn.Reply.Content, null, turn.Reply.ReasoningContent));
         }
-        var context = await Task.Run(() => BuildContext(user, aiUserId, state, request), ct);
+        // Identifiers (SKU, address, lot, quantity) say what to do it with, not which procedure applies: they are left out
+        // of the topic and at least two distinct words must match, so a stray common word never injects a chunk. With
+        // embeddings on, the topic is also embedded (masked) and a chunk may enter by meaning above the context threshold.
+        IReadOnlyList<KnowledgeHit> contextChunks = [];
+        if (knowledge is not null)
+        {
+            try
+            {
+                contextChunks = await knowledge.SearchHybridAsync(Identifiers().Replace(request, " "), MaxContextChunks,
+                    MinContextKnowledgeScore, MinContextTerms, forContext: true, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                System.Diagnostics.Trace.TraceWarning("Planner: knowledge search failed: " + ex.GetType().Name);
+            }
+        }
+        var context = await Task.Run(() => BuildContext(user, aiUserId, state, request, contextChunks), ct);
         messages.Add(LlmMessage.User(context + request));
 
         var tokens = 0;
@@ -438,7 +454,7 @@ public sealed partial class Planner(
     /// The automatic context of a request: the best memories and procedure chunks, as reference data placed in front of the
     /// current user message (never in the system prompt or the history). Nothing here may stop the request.
     /// </summary>
-    private string BuildContext(UserSession user, long? aiUserId, RunState state, string request)
+    private string BuildContext(UserSession user, long? aiUserId, RunState state, string request, IReadOnlyList<KnowledgeHit> chunks)
     {
         if (memoryRetriever is null && knowledge is null) return string.Empty;
         try
@@ -446,9 +462,6 @@ public sealed partial class Planner(
             var memoryRows = new List<MemoryHit>();
             if (memoryRetriever is not null)
                 memoryRows.AddRange(memoryRetriever.Search(user, request, new MemorySearchOptions(MaxContextMemories, MinContextMemoryConfidence)));
-            // Identifiers (SKU, address, lot, quantity) say what to do it with, not which procedure applies: they are left out
-            // of the topic and at least two distinct words must match, so a stray common word never injects a chunk.
-            var chunks = knowledge?.Search(Identifiers().Replace(request, " "), MaxContextChunks, MinContextKnowledgeScore, MinContextTerms) ?? [];
             if (memoryRows.Count == 0 && chunks.Count == 0) return string.Empty;
 
             var builder = new StringBuilder();

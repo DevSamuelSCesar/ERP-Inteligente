@@ -1,7 +1,10 @@
-﻿# Only for train_lora.py and predict_claude.py; the dataset generator and the evaluator use the standard library.
+# Only for train_lora.py, serve_local.py and predict_claude.py; the dataset generator, the evaluator and predict_local.py
+# use the standard library. Tested with torch 2.14 (CUDA 12.6), transformers 5.22, peft 0.21 on a 6 GB GTX 1660.
+# For CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu126
 anthropic
 torch>=2.4
 transformers>=4.46
 datasets>=3.0
 peft>=0.13
-trl>=0.12
+accelerate>=1.0
+bitsandbytes>=0.45

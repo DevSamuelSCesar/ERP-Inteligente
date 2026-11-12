@@ -92,6 +92,11 @@ public sealed class KnowledgeIndexTests : IDisposable
     }
 
     [Fact]
-    public async Task NullEmbeddingProvider_ReturnsNull() =>
-        Assert.Null(await new NullEmbeddingProvider().EmbedAsync("x", CancellationToken.None));
+    public async Task NullEmbeddingProvider_IsOff()
+    {
+        Assert.Null(NullEmbeddingProvider.Instance.Model);
+        var error = await Assert.ThrowsAsync<erp_inteligente.Core.Llm.LlmException>(() =>
+            NullEmbeddingProvider.Instance.EmbedAsync(["x"], CancellationToken.None));
+        Assert.Equal(erp_inteligente.Core.Llm.LlmErrorKind.NotConfigured, error.Kind);
+    }
 }

@@ -9,6 +9,7 @@ using erp_inteligente.Services;
 using erp_inteligente.Services.Sqlite;
 using Nexus.Tests.Core.Engine;
 using Nexus.Tests.Core.Policy;
+using Nexus.Tests.Fakes;
 using Nexus.Tests.Services;
 using PlannerClass = erp_inteligente.Core.Planner.Planner;
 
@@ -543,5 +544,50 @@ public sealed class MemoryContextTests : IDisposable
         Assert.Equal(MemoryOrigin.System, memory.Origin);
         Assert.Equal("armazenagem", memory.ScopeRef);
         Assert.DoesNotContain("Q-99-99\"", memory.Content); // the error message, never the model's JSON
+    }
+
+    // ---- hybrid search (embeddings) -------------------------------------------------------------------------
+
+    private async Task<(PlannerClass Planner, ConceptEmbeddingProvider Embeddings)> HybridPlanner()
+    {
+        var embeddings = new ConceptEmbeddingProvider(concepts: [["gelada", "gelado", "refrigerado", "refrigerados", "refrigerada", "camara", "frio"]])
+        {
+            Thresholds = new EmbeddingThresholds(Search: 0.1, Context: 0.2),
+        };
+        var index = new KnowledgeVectorIndex(_f.Db.Database, embeddings, _f.Time);
+        await index.SyncAsync(TestContext.Current.CancellationToken);
+        var planner = new PlannerClass(_llm, new LlmSettings(_f.Db.Store, "memory-tests"), _f.Db.Database, _f.Policy, _f.Audit,
+            new PlanEngine(_f.Db.Database, _f.Policy, _f.Audit, _f.Time), memories: _store,
+            memoryRetriever: new MemoryRetriever(_f.Db.Database, _f.Policy), knowledge: new KnowledgeRetriever(_f.Db.Database, index));
+        return (planner, embeddings);
+    }
+
+    [Fact]
+    public async Task With_embeddings_a_procedure_enters_the_context_by_meaning()
+    {
+        var (planner, embeddings) = await HybridPlanner();
+        const string request = "onde ponho mercadoria gelada";
+        Assert.Empty(new KnowledgeRetriever(_f.Db.Database).Search(request, 2, PlannerClass.MinContextKnowledgeScore, 2));
+        embeddings.Texts.Clear();
+        _llm.Enqueue(Text("ok"));
+
+        await Run(planner, _joao, request);
+
+        Assert.Contains("<dados fonte=\"knowledge:", FirstUserMessage());
+        Assert.Contains("refrigera", FirstUserMessage(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(request, Assert.Single(embeddings.Texts));
+    }
+
+    [Fact]
+    public async Task Embeddings_failure_never_stops_the_request()
+    {
+        var (planner, embeddings) = await HybridPlanner();
+        embeddings.FailWith = LlmErrorKind.Unavailable;
+        _llm.Enqueue(Text("ok"));
+
+        var (result, _) = await Run(planner, _joao, "onde ponho mercadoria gelada");
+
+        Assert.IsType<PlannerAnswer>(result);
+        Assert.DoesNotContain("<dados fonte=\"knowledge:", FirstUserMessage());
     }
 }

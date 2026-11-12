@@ -30,8 +30,12 @@ public sealed class AppHost : IDisposable
     /// <param name="secrets">The OS key store; it also holds the DeepSeek key (references/ARQUITETURA.md, section 12.10).</param>
     /// <param name="llm">The provider; null builds the real DeepSeek client (tests pass a scripted one).</param>
     /// <param name="runScheduledJobs">Runs the daily jobs now (feature 9: backup and memory maintenance); the app does, tests do not.</param>
+    /// <param name="embeddings">Embeddings of the RAG; null builds the configured provider (OpenAI or local), or none when
+    /// <paramref name="llm"/> is scripted (tests never reach a real API).</param>
+    /// <param name="embeddingsHandler">HTTP handler of the configured embeddings provider (tests pass a fake one).</param>
     public AppHost(NexusDatabase database, TimeProvider time, Argon2Parameters passwordParameters, AuthOptions authOptions,
-        ISecretStore secrets, ILlmProvider? llm = null, bool runScheduledJobs = false)
+        ISecretStore secrets, ILlmProvider? llm = null, bool runScheduledJobs = false, IEmbeddingProvider? embeddings = null,
+        System.Net.Http.HttpMessageHandler? embeddingsHandler = null)
     {
         Database = database;
         Time = time;
@@ -70,16 +74,21 @@ public sealed class AppHost : IDisposable
             [LlmProviderKind.OpenAI] = openAi!,
             [LlmProviderKind.Local] = local!,
         });
+        // Feature 5: vectors of the procedures for the hybrid search; off until an administrator picks a provider.
+        Embeddings = embeddings ?? (llm is null || embeddingsHandler is not null
+            ? new ConfiguredEmbeddingProvider(LlmSettings, embeddingsHandler ?? handler)
+            : NullEmbeddingProvider.Instance);
+        VectorIndex = new KnowledgeVectorIndex(database, Embeddings, time);
         LlmSettingsService = new LlmSettingsService(LlmSettings, Policy, AuditLog, (provider, ct) => provider switch
         {
             LlmProviderKind.DeepSeek => deepSeek?.TestConnectionAsync(ct) ?? Task.CompletedTask,
             LlmProviderKind.Claude => claude?.TestConnectionAsync(ct) ?? Task.CompletedTask,
             LlmProviderKind.OpenAI => openAi?.TestConnectionAsync(ct) ?? Task.CompletedTask,
             _ => local?.TestConnectionAsync(LlmSettings.LocalModel, ct) ?? Task.CompletedTask,
-        });
+        }, VectorIndex);
         SyncKnowledge(database);
         MemoryRetriever = new MemoryRetriever(database, Policy);
-        KnowledgeRetriever = new KnowledgeRetriever(database);
+        KnowledgeRetriever = new KnowledgeRetriever(database, VectorIndex);
         Planner = new Planner(Llm, LlmSettings, database, Policy, AuditLog, Engine, skills: skills,
             memories: MemoryStore, memoryRetriever: MemoryRetriever, knowledge: KnowledgeRetriever,
             recipeMatcher: new RecipeMatcher(Llm, RecipeStore, AuditLog, LlmSettings, UsageLog), usage: UsageLog,
@@ -100,6 +109,13 @@ public sealed class AppHost : IDisposable
         catch (Exception ex) { Trace.TraceWarning("Scheduled backup failed: " + ex.GetType().Name); }
         try { MemoryMaintenance.RunScheduled(); }
         catch (Exception ex) { Trace.TraceWarning("Scheduled memory maintenance failed: " + ex.GetType().Name); }
+        // Vectors of new or changed procedures, in the background: the search stays BM25 for chunks not embedded yet.
+        if (Embeddings.Model is not null)
+            _ = Task.Run(async () =>
+            {
+                try { await VectorIndex.SyncAsync(System.Threading.CancellationToken.None); }
+                catch (Exception ex) { Trace.TraceWarning("Knowledge embedding failed: " + ex.GetType().Name); }
+            });
     }
 
     public NexusDatabase Database { get; }
@@ -123,6 +139,8 @@ public sealed class AppHost : IDisposable
     public BackupService Backups { get; }
     public MemoryRetriever MemoryRetriever { get; }
     public KnowledgeRetriever KnowledgeRetriever { get; }
+    public IEmbeddingProvider Embeddings { get; }
+    public KnowledgeVectorIndex VectorIndex { get; }
 
     /// <summary>Last verification of the audit hash chain (at startup and at every login).</summary>
     public AuditVerification AuditStatus { get; private set; }

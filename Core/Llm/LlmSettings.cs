@@ -28,6 +28,34 @@ public sealed class LlmSettings(ISecretStore store, string databaseId)
     public const int MaxKeyLength = 200;
 
     private const string LocalPortEntry = "llm.local.port";
+    private const string EmbeddingEntry = "llm.embedding";
+
+    /// <summary>OpenAI embeddings model of the RAG (references/IA.md, section 3): 1,536 dimensions.</summary>
+    public const string OpenAiEmbeddingModel = "text-embedding-3-small";
+
+    /// <summary>Alias of the embeddings model served on 127.0.0.1 by tools/finetune/serve_local.py.</summary>
+    public const string LocalEmbeddingModel = "nexus-embed";
+
+    /// <summary>Providers that can embed text: Anthropic and DeepSeek have no embeddings API.</summary>
+    public static IReadOnlyList<LlmProviderKind> EmbeddingProviders { get; } = [LlmProviderKind.OpenAI, LlmProviderKind.Local];
+
+    public static string EmbeddingModelFor(LlmProviderKind provider) => provider switch
+    {
+        LlmProviderKind.OpenAI => OpenAiEmbeddingModel,
+        LlmProviderKind.Local => LocalEmbeddingModel,
+        _ => throw new ArgumentException("This provider has no embeddings.", nameof(provider)),
+    };
+
+    /// <summary>The id stored with each vector: vectors of another id are never compared.</summary>
+    public static string EmbeddingModelId(LlmChoice choice) => Format(choice);
+
+    /// <summary>
+    /// Cosine thresholds per model. text-embedding-3-small spreads similarities widely (unrelated Portuguese texts around 0.1
+    /// to 0.25); the local model (paraphrase-multilingual-MiniLM-L12-v2) was measured on the 22 documents of knowledge/.
+    /// </summary>
+    public static Knowledge.EmbeddingThresholds EmbeddingThresholdsFor(LlmChoice choice) => choice.Provider == LlmProviderKind.Local
+        ? new Knowledge.EmbeddingThresholds(Search: 0.40, Context: 0.55)
+        : new Knowledge.EmbeddingThresholds(Search: 0.30, Context: 0.50);
 
     public static IReadOnlyList<string> SupportedModels { get; } = [StrongModel, FastModel];
 
@@ -161,6 +189,27 @@ public sealed class LlmSettings(ISecretStore store, string databaseId)
             _store.Set(_databaseId, LocalPortEntry, Encoding.UTF8.GetBytes(value.ToString(CultureInfo.InvariantCulture)));
         }
     }
+
+    /// <summary>The embeddings provider of the hybrid RAG search; null = off (BM25 only, the default).</summary>
+    /// <exception cref="ArgumentException">The provider cannot embed or the model is not its embeddings model.</exception>
+    public LlmChoice? EmbeddingChoice
+    {
+        get => ReadText(EmbeddingEntry) is { } text && Parse(text) is { } choice && IsEmbeddingChoice(choice) ? choice : null;
+        set
+        {
+            if (value is null)
+            {
+                _store.Delete(_databaseId, EmbeddingEntry);
+                return;
+            }
+            if (!IsEmbeddingChoice(value))
+                throw new ArgumentException("Unsupported embeddings model.", nameof(value));
+            _store.Set(_databaseId, EmbeddingEntry, Encoding.UTF8.GetBytes(Format(value)));
+        }
+    }
+
+    private static bool IsEmbeddingChoice(LlmChoice choice) =>
+        EmbeddingProviders.Contains(choice.Provider) && choice.Model == EmbeddingModelFor(choice.Provider);
 
     public static string ProviderName(LlmProviderKind provider) => provider switch
     {

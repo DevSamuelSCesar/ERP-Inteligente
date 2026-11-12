@@ -9,13 +9,23 @@ and has at least 99% valid JSON.
 |------|---------|-------|
 | 1. Dataset (500 examples, 400 train / 100 test, 15% out of scope) | `python tools/finetune/generate_dataset.py` | Standard library |
 | 2. Baseline: Haiku 5.5 few-shot | `python tools/finetune/predict_claude.py --data tools/finetune/data --out tools/finetune/data/pred_haiku.jsonl` | `anthropic` SDK, `ANTHROPIC_API_KEY` |
-| 3. LoRA training (Qwen2.5-1.5B-Instruct) | `python tools/finetune/train_lora.py --data tools/finetune/data --out tools/finetune/out/nexus-matcher` | GPU, `requirements-train.txt` |
-| 4. Serve the model on `127.0.0.1` as `nexus-matcher` | e.g. merge the adapter, convert to GGUF and run `llama-server --port 8080 --alias nexus-matcher` | llama.cpp, vLLM or Ollama |
-| 5. Candidate predictions | `python tools/finetune/predict_local.py --data tools/finetune/data --out tools/finetune/data/pred_local.jsonl` | Standard library |
+| 3. LoRA training (Qwen2.5-1.5B-Instruct) | `python tools/finetune/train_lora.py --data tools/finetune/data --out DIR/nexus-matcher` | CUDA GPU, `requirements-train.txt` |
+| 4. Serve on `127.0.0.1` (Matcher `nexus-matcher` and embeddings `nexus-embed`) | `python tools/finetune/serve_local.py --matcher DIR/nexus-matcher/merged --port 8080` | `requirements-train.txt` |
+| 5. Candidate predictions | `python tools/finetune/predict_local.py --data tools/finetune/data --out tools/finetune/data/pred_local.jsonl --port 8080` | Standard library |
 | 6. Metrics and adoption | `python tools/finetune/evaluate.py --gold tools/finetune/data/test.jsonl --pred tools/finetune/data/pred_local.jsonl --baseline tools/finetune/data/pred_haiku.jsonl` | Standard library |
 
-If `adopt_candidate` is true, an administrator picks **Modelo local** for "Receitas (Matcher)" in Configurações (port of
-the local server there). The app accepts the dataset's answer format, and the system prompt of every example is
-`Core/Recipes/Prompts/matcher.md`, the same file the app embeds: train and production inputs match.
+Notes on step 3:
+
+- The loss is computed only on the answer (the prompt tokens are masked), with the plain `transformers` Trainer and PEFT.
+- It was run on a 6 GB GTX 1660 with `--no-4bit` (fp16 weights, batch 1 × 16 accumulation, gradient checkpointing). The
+  4-bit QLoRA default fits smaller GPUs but was slower there, because the activations spilled into shared memory.
+- bf16 is used only where the GPU has it natively (compute capability 8.0+); Turing cards train in fp16.
+- Keep `DIR` outside the repository (the merged model is about 3 GB): nothing under `out/` is committed.
+
+Step 4 also serves the embeddings of the hybrid RAG search (`paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensions);
+`--no-matcher` serves only them. In Configurações, an administrator picks **Modelo local** for "Receitas (Matcher)" (if
+`adopt_candidate` is true) and/or for "Busca por significado", with the port of the server. The app accepts the dataset's
+answer format, and the system prompt of every example is `Core/Recipes/Prompts/matcher.md`, the same file the app embeds:
+train and production inputs match.
 
 Data is fictitious (catalog of `db/seed.sql` plus the recipes in `recipes.json`). Nothing here stores a key.

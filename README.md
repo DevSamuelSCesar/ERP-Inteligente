@@ -55,8 +55,8 @@ flowchart TB
 
         subgraph RAG["RAG"]
             CHK["knowledge/*.md<br/>chunking por seção ##"]
-            EMB["Embeddings<br/>1.536 dimensões · etapa futura"]
-            HYB["Busca BM25 (FTS5) hoje<br/>híbrida BM25 + cosseno depois"]
+            EMB["Embeddings opcionais<br/>OpenAI 1.536 d · local 384 d"]
+            HYB["Busca híbrida<br/>BM25 (FTS5) + cosseno (sqlite-vec) · RRF"]
         end
 
         subgraph ENG["Motor determinístico · sem LLM"]
@@ -545,7 +545,7 @@ App **desktop nativo** em **C# + Avalonia** (não é web nem SaaS). Banco **SQLi
 
 - **Diagrama da arquitetura** (LLM, RAG, fine-tuning e interface): seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima.
 - **LLM e custo:** Sonnet 5.5 + Haiku 5.5 custam **≈ US$ 30,90 por 1.000 usos**, caindo para ≈ US$ 17,75 quando 60% dos pedidos viram receitas. Comparativo com Opus 5.5, Haiku puro e DeepSeek em [`references/IA.md`](references/IA.md).
-- **RAG:** chunks por seção `##` dos 22 procedimentos, indexados na abertura, com busca FTS5/BM25 sem acento; memórias e trechos relevantes entram no pedido como dados delimitados. Embeddings de 1.536 dimensões, `sqlite-vec` e a busca híbrida BM25 + cosseno são a etapa seguinte (decisão de 2026-11-08: só BM25 por enquanto).
+- **RAG:** chunks por seção `##` dos 22 procedimentos, indexados na abertura, com busca FTS5/BM25 sem acento; memórias e trechos relevantes entram no pedido como dados delimitados. Com embeddings ligados em Configurações (OpenAI `text-embedding-3-small` ou um modelo local em `127.0.0.1`), a busca é híbrida: top-20 do BM25 + top-20 por cosseno (distância pelo `sqlite-vec`), combinados por *Reciprocal Rank Fusion*; a pergunta vai mascarada e, sem embeddings, a busca continua só BM25.
 - **Memórias:** por armazém, gravadas pela IA (`remember`) e pelo sistema (rejeições) através de um filtro que recusa dados pessoais e texto com cara de instrução; só o supervisor corrige e arquiva, na tela Memórias.
 - **Fine-tuning:** um modelo aberto pequeno com LoRA transforma pedidos em `{intent, recipe, params}`. Métricas: *exact match*, F1 por campo e % de JSON válido, comparados com o Haiku em *few-shot*.
 - **Dados:** 22 documentos **fictícios** em [`knowledge/`](knowledge/README.md) (procedimentos e políticas de um centro de distribuição inventado).
@@ -603,7 +603,7 @@ Permissão e regras de cada uma em [`references/ARQUITETURA.md`](references/ARQU
 
 - **Diagrama único** juntando banco, LLM e RAG, com permissões, proteção de dados e auditoria marcadas: seção [Diagrama da arquitetura](#diagrama-da-arquitetura) acima, incluindo os ataques.
 - **Matriz ampliada com a IA:** a IA lê só as views `v_ai_*` por uma conexão somente leitura e age com a **interseção** dos seus direitos com os de quem pediu. Ela nunca aprova nada, não vê dados sensíveis e não grava skills (as próprias instruções). Desde 2026-11-08 ela tem os direitos operacionais do usuário (ajuste, expedição, cadastros e pedidos), com confirmação de quem pediu e aprovação de outro supervisor para críticos.
-- **Ataques testados:** prompt injection (5 vetores) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (108 testes) e nos testes do app em `tests/Nexus.Tests` (1377 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
+- **Ataques testados:** prompt injection (5 vetores) e SQL injection + escalonamento de privilégio, automatizados em `db/tests/test_db.py` (113 testes) e nos testes do app em `tests/Nexus.Tests` (1410 testes, incluindo o *authorizer* da IA, o bloqueio de login, o isolamento entre armazéns, a detecção de adulteração da auditoria, planos maliciosos e a segregação de funções na aprovação): [`references/SEGURANCA_DADOS.md`](references/SEGURANCA_DADOS.md), seção 6.
 - **Suíte de 25 ataques com métricas (feature 6):** o modelo é simulado obedecendo à injeção, e as defesas fora dele seguram tudo. Resultado: **0% de sucesso dos ataques e 100% de detecção**. Textos suspeitos nos dados são marcados, auditados como `ai.injection` e avisados ao operador. A auditoria mascara CPF, CNPJ, e-mail, telefone e chaves antes do hash.
 - **Operação (feature 9):**
   - **Backup:** backup criptografado diário pela API do SQLite (mesma chave do SQLCipher, 7 cópias). O administrador também faz e restaura backups, e a restauração é verificada antes.

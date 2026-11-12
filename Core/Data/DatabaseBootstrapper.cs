@@ -10,7 +10,7 @@ namespace erp_inteligente.Core.Data;
 public static class DatabaseBootstrapper
 {
     /// <summary>Value of <c>PRAGMA user_version</c> of a completely initialised database.</summary>
-    public const int SchemaVersion = 8;
+    public const int SchemaVersion = 9;
 
     /// <summary>Migration scripts (db/migrations) indexed by the version they upgrade FROM.</summary>
     private static readonly (int From, string Script)[] Migrations =
@@ -22,6 +22,7 @@ public static class DatabaseBootstrapper
         (5, "migrations.006_memory.sql"),
         (6, "migrations.007_recipes.sql"),
         (7, "migrations.008_llm_usage.sql"),
+        (8, "migrations.009_knowledge_embeddings.sql"),
     ];
 
     private static readonly string[] Scripts = ["schema.sql", "security.sql", "seed.sql", "optimize.sql"];

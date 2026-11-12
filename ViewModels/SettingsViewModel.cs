@@ -26,6 +26,12 @@ public sealed record ProviderStatusRow(string Name, bool IsConfigured, string St
 /// <summary>One backup file in the list.</summary>
 public sealed record BackupRow(string FileName, string CreatedText, string SizeText);
 
+/// <summary>An embeddings choice of the RAG search; <see cref="Choice"/> null = off.</summary>
+public sealed record EmbeddingOption(LlmChoice? Choice, string Label)
+{
+    public override string ToString() => Label;
+}
+
 /// <summary>
 /// Session and application information, plus the LLM section (feature 8):
 /// <list type="bullet">
@@ -80,6 +86,9 @@ public sealed partial class SettingsViewModel : PageViewModel
             MatcherModels = LlmSettings.ModelsFor(matcher.Provider);
             MatcherModel = matcher.Model;
             LocalPortText = llm.LocalPort.ToString(CultureInfo.InvariantCulture);
+            HasEmbeddings = llm.HasEmbeddings;
+            var embedding = llm.EmbeddingChoice;
+            SelectedEmbedding = EmbeddingOptions.First(o => o.Choice == embedding);
         }
         _loading = false;
         RefreshStatus();
@@ -184,6 +193,39 @@ public sealed partial class SettingsViewModel : PageViewModel
             return Task.FromResult<string?>(null);
         }, $"{label}: {LlmSettings.ProviderName(choice.Provider)}, modelo {choice.Model}.");
     }
+
+    // ---- embeddings of the RAG (feature 5) -------------------------------------------------------------------
+
+    /// <summary>Off (BM25 only), OpenAI text-embedding-3-small or the model served on 127.0.0.1.</summary>
+    public IReadOnlyList<EmbeddingOption> EmbeddingOptions { get; } =
+    [
+        new(null, "Desligada (só palavras)"),
+        new(new LlmChoice(LlmProviderKind.OpenAI, LlmSettings.OpenAiEmbeddingModel), "OpenAI · " + LlmSettings.OpenAiEmbeddingModel),
+        new(new LlmChoice(LlmProviderKind.Local, LlmSettings.LocalEmbeddingModel), "Modelo local · " + LlmSettings.LocalEmbeddingModel),
+    ];
+
+    public bool HasEmbeddings { get; }
+
+    [ObservableProperty]
+    public partial EmbeddingOption? SelectedEmbedding { get; set; }
+
+    [ObservableProperty] public partial string EmbeddingStatusText { get; private set; } = "";
+
+    /// <summary>Saving a new provider indexes the procedures right away (only chunks without a vector of that model).</summary>
+    partial void OnSelectedEmbeddingChanged(EmbeddingOption? value)
+    {
+        if (_loading || value is null || _llm is null || !CanConfigure || _llm.EmbeddingChoice == value.Choice) return;
+        _ = Run(async () =>
+        {
+            _llm.SetEmbeddingChoice(_user, value.Choice);
+            return value.Choice is null ? null : await _llm.IndexAsync(_user);
+        }, value.Choice is null ? "Busca por significado desligada: só palavras (BM25)." : $"Busca híbrida com {value.Label}: procedimentos indexados.");
+    }
+
+    private bool CanIndex() => CanConfigure && !IsWorking && SelectedEmbedding?.Choice is not null;
+
+    [RelayCommand(CanExecute = nameof(CanIndex))]
+    private Task IndexAsync() => Run(() => _llm!.IndexAsync(_user), "Procedimentos indexados.");
 
     // ---- local model ---------------------------------------------------------------------------------------
 
@@ -290,7 +332,7 @@ public sealed partial class SettingsViewModel : PageViewModel
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SaveKeyCommand), nameof(ClearKeyCommand), nameof(TestCommand), nameof(SaveLocalPortCommand), nameof(TestLocalCommand),
-        nameof(CreateBackupCommand), nameof(RequestRestoreCommand), nameof(ConfirmRestoreCommand))]
+        nameof(CreateBackupCommand), nameof(RequestRestoreCommand), nameof(ConfirmRestoreCommand), nameof(IndexCommand))]
     public partial bool IsWorking { get; private set; }
 
     [ObservableProperty] public partial string Feedback { get; private set; } = "";
@@ -434,6 +476,20 @@ public sealed partial class SettingsViewModel : PageViewModel
         }
         ProviderRows.Clear();
         foreach (var row in rows) ProviderRows.Add(row);
+        IndexCommand.NotifyCanExecuteChanged();
+        try
+        {
+            EmbeddingStatusText = _llm.Coverage() is not { } coverage ? ""
+                : coverage.Model is null ? "Desligada: os procedimentos são buscados só por palavras (BM25)."
+                : $"{coverage.WithVector} de {coverage.Total} trechos com vetor · " +
+                  (coverage.SqliteVec ? "distância calculada pelo sqlite-vec" : "distância calculada no app") +
+                  " · palavras e significado combinados (RRF)";
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError("Vector coverage unavailable: {0}", ex.GetType().Name);
+            EmbeddingStatusText = "";
+        }
 
         IsKeyConfigured = selectedConfigured;
         var name = SelectedKeyProvider.Label;
